@@ -66,13 +66,14 @@ frontend/.env
 frontend/.env.local
 
 # =====================================
-# Cryptographic keys
+# Cryptographic keys (runtime directories)
 # =====================================
 *.pem
 *.key
 *.cert
-keys/
+/keys/
 backend/keys/
+!security/src/keys/
 
 # =====================================
 # Editor and operating system files
