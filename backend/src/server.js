@@ -2,29 +2,47 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import app from './app.js';
-import { connectDB, disconnectDB } from './config/db.js';
+import { connectDB, disconnectDB, isValidMongoUri } from './config/db.js';
 
 const PORT = process.env.PORT || 5000;
+const isProduction = process.env.NODE_ENV === 'production';
 
 let server;
 
 const startServer = async () => {
-  try {
-    // Attempt database connection if URI is configured
-    if (process.env.MONGODB_URI) {
-      await connectDB();
-    } else {
-      console.warn('[Warning] MONGODB_URI not provided. Starting server without active DB connection.');
-    }
+  const uri = process.env.MONGODB_URI;
 
-    server = app.listen(PORT, () => {
-      console.log(`[Server] HHH SecureLog Backend running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
-      console.log(`[Server] Health check available at: http://localhost:${PORT}/health`);
-    });
-  } catch (error) {
-    console.error(`[Server Error] Failed to initialize server: ${error.message}`);
-    process.exit(1);
+  if (uri && isValidMongoUri(uri)) {
+    try {
+      await connectDB(uri);
+    } catch (dbError) {
+      console.warn(`\n[Database Warning] Could not establish MongoDB connection: ${dbError.message}`);
+      if (isProduction) {
+        console.error('[Fatal] Exiting process because database connection is required in production.');
+        process.exit(1);
+      }
+      console.warn('[Database Notice] Running in development mode with offline/mock database resilience.\n');
+    }
+  } else {
+    console.warn('\n================================================================');
+    console.warn('⚠️  MONGODB_URI in backend/.env is unconfigured or a placeholder.');
+    console.warn(`   Current value: "${uri || 'undefined'}"`);
+    console.warn('   To connect to MongoDB Atlas, set MONGODB_URI to:');
+    console.warn('   mongodb+srv://<username>:<password>@<cluster>.mongodb.net/securelog');
+    console.warn('   Or for a local MongoDB instance:');
+    console.warn('   mongodb://127.0.0.1:27017/securelog');
+    console.warn('================================================================\n');
+
+    if (isProduction) {
+      console.error('[Fatal] Valid MONGODB_URI is required in production.');
+      process.exit(1);
+    }
   }
+
+  server = app.listen(PORT, () => {
+    console.log(`[Server] HHH SecureLog Backend running on http://localhost:${PORT} [${process.env.NODE_ENV || 'development'}]`);
+    console.log(`[Server] Health check available at: http://localhost:${PORT}/health`);
+  });
 };
 
 // Graceful Shutdown Handler

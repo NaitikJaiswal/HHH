@@ -1,11 +1,29 @@
 import mongoose from 'mongoose';
 
 /**
+ * Checks whether a MongoDB connection string has a valid protocol and is not a placeholder
+ */
+export const isValidMongoUri = (uri) => {
+  if (!uri || typeof uri !== 'string') return false;
+  const trimmed = uri.trim();
+  if (trimmed.includes('YOUR_MONGODB_') || trimmed.includes('replace_with') || trimmed.includes('<password>')) {
+    return false;
+  }
+  return trimmed.startsWith('mongodb://') || trimmed.startsWith('mongodb+srv://');
+};
+
+/**
  * Connect to MongoDB Atlas / Local MongoDB instance
  */
 export const connectDB = async (uri = process.env.MONGODB_URI) => {
   if (!uri) {
     throw new Error('MONGODB_URI environment variable is not defined.');
+  }
+
+  if (!isValidMongoUri(uri)) {
+    throw new Error(
+      `Invalid MongoDB URI format: "${uri}". Expected connection string starting with "mongodb://" or "mongodb+srv://".`
+    );
   }
 
   // Mask credentials in logs for security
