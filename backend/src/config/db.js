@@ -1,4 +1,12 @@
 import mongoose from 'mongoose';
+import dns from 'dns';
+
+// Ensure reliable SRV DNS resolution for MongoDB Atlas on Windows environments
+try {
+  dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+} catch {
+  // Gracefully fallback to system default if setting DNS is restricted
+}
 
 /**
  * Checks whether a MongoDB connection string has a valid protocol and is not a placeholder
