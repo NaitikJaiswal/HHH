@@ -113,8 +113,12 @@ export function canonicalJson(value, _seen = new Set()) {
         `canonicalJson: non-finite number is not allowed in JSON: ${value}`
       );
     }
+    // RFC 8785 §3.2.2.3: -0 must be serialized as 0
+    if (Object.is(value, -0)) {
+      return '0';
+    }
     // Use JSON.stringify for number serialization — it handles integer vs. float
-    // correctly and never produces scientific notation for safe integers.
+    // correctly per ECMAScript rules and never produces scientific notation for safe integers.
     return JSON.stringify(value);
   }
 
@@ -198,11 +202,35 @@ function serializeString(str) {
       result += '\\"';
     } else if (char === '\\') {
       result += '\\\\';
+    } else if (char === '\b') {
+      result += '\\b';
+    } else if (char === '\t') {
+      result += '\\t';
+    } else if (char === '\n') {
+      result += '\\n';
+    } else if (char === '\f') {
+      result += '\\f';
+    } else if (char === '\r') {
+      result += '\\r';
     } else if (code < 0x20) {
-      // Control characters must be escaped per JSON specification
+      // Control characters (U+0000–U+001F) other than the 5 above must be \u00xx per RFC 8785 §3.2.2.2
       result += '\\u' + code.toString(16).padStart(4, '0');
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      // High surrogate: verify followed by valid low surrogate
+      if (i + 1 < str.length) {
+        const nextCode = str.charCodeAt(i + 1);
+        if (nextCode >= 0xdc00 && nextCode <= 0xdfff) {
+          result += char + str[i + 1];
+          i++;
+          continue;
+        }
+      }
+      throw new TypeError(`canonicalJson: string contains unpaired surrogate at index ${i}`);
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      // Unpaired low surrogate
+      throw new TypeError(`canonicalJson: string contains unpaired surrogate at index ${i}`);
     } else {
-      // U+0020 and above (including all non-ASCII) — preserve as literal character
+      // U+0020 and above (including all valid Unicode) — preserve as literal UTF-8 character
       result += char;
     }
   }

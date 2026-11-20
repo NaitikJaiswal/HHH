@@ -199,3 +199,103 @@ test('10. §1.3.5 exact canonical string is reproduced', () => {
     'Canonical string must match the exact string defined in §1.3.5 of the integration contract'
   );
 });
+
+test('11. RFC 8785 §3.2.2.2 standard escape sequences (\\b, \\t, \\n, \\f, \\r, \\", \\\\)', () => {
+  const obj = {
+    control: 'bell:\b tab:\t newline:\n formfeed:\f return:\r quote:\" backslash:\\ null:\u0000',
+  };
+  const result = canonicalJson(obj);
+  assert.equal(
+    result,
+    '{"control":"bell:\\b tab:\\t newline:\\n formfeed:\\f return:\\r quote:\\\" backslash:\\\\ null:\\u0000"}',
+    'Standard control characters must use short 2-character escapes per RFC 8785'
+  );
+});
+
+test('12. RFC 8785 §3.2.2.3 negative zero (-0) serializes as 0', () => {
+  const result = canonicalJson({ zero: -0, positiveZero: +0 });
+  assert.equal(
+    result,
+    '{"positiveZero":0,"zero":0}',
+    '-0 must be serialized as 0 per RFC 8785 §3.2.2.3'
+  );
+});
+
+test('13. Numeric boundaries and precision', () => {
+  const obj = {
+    maxSafe: Number.MAX_SAFE_INTEGER,
+    minSafe: Number.MIN_SAFE_INTEGER,
+    float: 3.14159,
+    smallFloat: 0.000001,
+  };
+  const result = canonicalJson(obj);
+  const parsed = JSON.parse(result);
+  assert.equal(parsed.maxSafe, 9007199254740991);
+  assert.equal(parsed.minSafe, -9007199254740991);
+  assert.equal(parsed.float, 3.14159);
+});
+
+test('14. Supplementary plane Unicode (non-BMP: U+10000 to U+10FFFF) preserved as literal UTF-8', () => {
+  // 𠮷 is U+20BB7, 𝄞 is U+1D11E, 🔐 is U+1F510
+  const obj = { kanji: '𠮷野家', clef: '𝄞', lock: '🔐' };
+  const result = canonicalJson(obj);
+  assert.equal(
+    result,
+    '{"clef":"𝄞","kanji":"𠮷野家","lock":"🔐"}',
+    'Non-BMP supplementary characters must remain literal UTF-8'
+  );
+});
+
+test('15. Unpaired surrogates are rejected with TypeError', () => {
+  assert.throws(
+    () => canonicalJson({ bad: '\uD800' }), // lone high surrogate
+    TypeError,
+    'Unpaired high surrogate must throw TypeError'
+  );
+  assert.throws(
+    () => canonicalJson({ bad: '\uDC00' }), // lone low surrogate
+    TypeError,
+    'Unpaired low surrogate must throw TypeError'
+  );
+});
+
+test('16. Excessive recursion depth (> 10 levels) capped with sentinel', () => {
+  let deep = { val: 'leaf' };
+  for (let i = 0; i < 12; i++) {
+    deep = { next: deep };
+  }
+  const sorted = sortKeysDeep(deep);
+  const result = canonicalJson(sorted);
+  assert.ok(
+    result.includes('[DEEP_OBJECT]'),
+    'Nesting beyond MAX_DEPTH (10) must be replaced with [DEEP_OBJECT]'
+  );
+});
+
+test('17. Deterministic output across 100 repeated permutations', () => {
+  const values = {
+    alpha: 1,
+    bravo: 2,
+    charlie: 3,
+    delta: 4,
+    echo: 5,
+    foxtrot: 6,
+  };
+  const keys = Object.keys(values);
+  const baseline = canonicalJson(values);
+
+  for (let iter = 0; iter < 100; iter++) {
+    // Shuffle keys
+    const shuffled = [...keys].sort(() => Math.random() - 0.5);
+    const obj = {};
+    for (const k of shuffled) {
+      obj[k] = values[k];
+    }
+    assert.equal(
+      canonicalJson(obj),
+      baseline,
+      `Iteration ${iter} must produce identical canonical output regardless of insertion order`
+    );
+  }
+});
+
