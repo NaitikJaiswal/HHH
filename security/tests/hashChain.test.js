@@ -174,3 +174,83 @@ test('10. First event with wrong previous_hash (not GENESIS_HASH) fails', () => 
   assert.ok(genesisError !== undefined, 'Must report a GENESIS_HASH violation at index 0');
   assert.equal(genesisError.index, 0, 'GENESIS_HASH error must be at index 0');
 });
+
+test('11. Modified metadata fails verification at that index', () => {
+  const chain = buildValidChain(3);
+  chain[1].metadata = { ip: '192.168.1.99', user: 'attacker' };
+  const result = verifyHashChain(chain);
+  assert.equal(result.valid, false, 'Modified metadata must fail verification');
+  assert.equal(result.firstFailedIndex, 1);
+  assert.equal(result.firstFailedSequenceNumber, 2);
+});
+
+test('12. Modified timestamp fails verification at that index', () => {
+  const chain = buildValidChain(3);
+  chain[2].event_time = '2026-11-20T15:30:00Z'; // altered timestamp (original was 12:00:00Z)
+  const result = verifyHashChain(chain);
+  assert.equal(result.valid, false, 'Modified timestamp must fail verification');
+  assert.equal(result.firstFailedIndex, 2);
+  assert.equal(result.firstFailedSequenceNumber, 3);
+});
+
+test('13. Duplicate sequence numbers are explicitly detected and reported', () => {
+  const chain = buildValidChain(3);
+  // Duplicate sequence number 2 on event index 2
+  chain[2].sequence_number = 2;
+  chain[2].current_hash = hashLogEvent(chain[2]);
+  const result = verifyHashChain(chain);
+  assert.equal(result.valid, false);
+  const dupError = result.errors.find((e) => e.type === 'DUPLICATE_SEQUENCE');
+  assert.ok(dupError !== undefined, 'Must report DUPLICATE_SEQUENCE error');
+  assert.equal(dupError.sequenceNumber, 2);
+});
+
+test('14. Out-of-order sequence numbers are detected', () => {
+  const chain = buildValidChain(3);
+  chain[2].sequence_number = 1; // 1, 2, 1
+  chain[2].current_hash = hashLogEvent(chain[2]);
+  const result = verifyHashChain(chain);
+  assert.equal(result.valid, false);
+  const oooError = result.errors.find((e) => e.type === 'OUT_OF_ORDER_SEQUENCE');
+  assert.ok(oooError !== undefined, 'Must report OUT_OF_ORDER_SEQUENCE error');
+});
+
+test('15. Detection of deleted final events (tail truncation) requires an independent checkpoint', async () => {
+  const { verifyHashChainWithCheckpoint } = await import('../src/crypto/hashChain.js');
+  const fullChain = buildValidChain(5);
+  const trustedCheckpoint = {
+    start_sequence: 1,
+    end_sequence: 5,
+    event_count: 5,
+    chain_head_hash: fullChain[4].current_hash,
+  };
+
+  // Truncate the latest 2 events from local storage (events 4 and 5 deleted)
+  const truncatedChain = fullChain.slice(0, 3);
+
+  // Note: local hash chain alone sees events 1..3 as internally consistent
+  const localOnly = verifyHashChain(truncatedChain);
+  assert.equal(localOnly.valid, true, 'Local hash chain alone cannot detect tail truncation');
+
+  // But verification against the independent checkpoint detects the missing suffix
+  const withCheckpoint = verifyHashChainWithCheckpoint(truncatedChain, trustedCheckpoint);
+  assert.equal(withCheckpoint.valid, false, 'Checkpoint verification must detect tail truncation');
+  const truncationError = withCheckpoint.errors.find((e) => e.type === 'TAIL_TRUNCATION');
+  assert.ok(truncationError !== undefined, 'Must report TAIL_TRUNCATION error');
+});
+
+test('16. verifyHashChainWithCheckpoint detects chain head mismatch and sequence bound errors', async () => {
+  const { verifyHashChainWithCheckpoint } = await import('../src/crypto/hashChain.js');
+  const chain = buildValidChain(3);
+  const forgedCheckpoint = {
+    start_sequence: 1,
+    end_sequence: 3,
+    event_count: 3,
+    chain_head_hash: 'f'.repeat(64), // mismatched head
+  };
+  const result = verifyHashChainWithCheckpoint(chain, forgedCheckpoint);
+  assert.equal(result.valid, false);
+  const headError = result.errors.find((e) => e.type === 'CHAIN_HEAD_MISMATCH');
+  assert.ok(headError !== undefined, 'Must report CHAIN_HEAD_MISMATCH error');
+});
+

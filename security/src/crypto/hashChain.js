@@ -62,25 +62,39 @@ export { GENESIS_HASH };
  * of internal consistency given the stored hash values.
  *
  * @param {object[]} events - Ordered array of log event objects (ascending sequence_number).
+ * @param {object} [options] - Verification configuration options.
+ * @param {string} [options.expectedGenesisHash] - Expected hash before first event (defaults to GENESIS_HASH).
+ * @param {number} [options.expectedStartSequence] - Expected sequence number of first event (optional).
  * @returns {ChainVerificationResult} Verification result.
  */
-export function verifyHashChain(events) {
+export function verifyHashChain(events, options = {}) {
   const errors = [];
+  const expectedGenesis = options.expectedGenesisHash ?? GENESIS_HASH;
 
   // Empty chain is trivially valid
   if (!Array.isArray(events) || events.length === 0) {
-    return { valid: true, errors: [], firstFailedIndex: null };
+    return { valid: true, errors: [], firstFailedIndex: null, firstFailedSequenceNumber: null };
   }
 
-  // Check 2: First event must reference GENESIS_HASH
+  // Check 2: First event must reference expectedGenesis (defaults to GENESIS_HASH)
   const firstEvent = events[0];
-  if (firstEvent.previous_hash !== GENESIS_HASH) {
+  if (firstEvent.previous_hash !== expectedGenesis) {
     errors.push({
       index: 0,
       sequenceNumber: firstEvent.sequence_number,
       sequence: firstEvent.sequence_number,
       type: 'GENESIS_MISMATCH',
       reason: `First event previous_hash is "${firstEvent.previous_hash}" but expected GENESIS_HASH (64 zeros)`,
+    });
+  }
+
+  if (options.expectedStartSequence !== undefined && Number(firstEvent.sequence_number) !== Number(options.expectedStartSequence)) {
+    errors.push({
+      index: 0,
+      sequenceNumber: firstEvent.sequence_number,
+      sequence: firstEvent.sequence_number,
+      type: 'START_SEQUENCE_MISMATCH',
+      reason: `First event sequence_number is ${firstEvent.sequence_number} but expected ${options.expectedStartSequence}`,
     });
   }
 
@@ -128,27 +142,148 @@ export function verifyHashChain(events) {
       }
     }
 
-    // Check 5: Consecutive sequence numbers (gap detection)
+    // Check 5: Sequence monotonicity, duplicate sequence, and gap detection
     if (i > 0) {
-      const prevSeq = events[i - 1].sequence_number;
-      const expectedSeq = Number(prevSeq) + 1;
-      if (Number(seqNum) !== expectedSeq) {
+      const prevSeq = Number(events[i - 1].sequence_number);
+      const curSeq = Number(seqNum);
+      const expectedSeq = prevSeq + 1;
+
+      if (curSeq === prevSeq) {
+        errors.push({
+          index: i,
+          sequenceNumber: seqNum,
+          sequence: seqNum,
+          type: 'DUPLICATE_SEQUENCE',
+          reason: `Duplicate sequence number ${curSeq} at index ${i}`,
+        });
+      } else if (curSeq < prevSeq) {
+        errors.push({
+          index: i,
+          sequenceNumber: seqNum,
+          sequence: seqNum,
+          type: 'OUT_OF_ORDER_SEQUENCE',
+          reason: `Out-of-order sequence at index ${i}: preceding was ${prevSeq}, got ${curSeq}`,
+        });
+      } else if (curSeq > expectedSeq) {
         errors.push({
           index: i,
           sequenceNumber: seqNum,
           sequence: seqNum,
           type: 'SEQUENCE_GAP',
-          reason: `Sequence number gap at index ${i}: expected ${expectedSeq}, got ${seqNum}`,
+          reason: `Sequence number gap at index ${i}: expected ${expectedSeq}, got ${curSeq}`,
         });
       }
     }
   }
 
   const firstFailedIndex = errors.length > 0 ? errors[0].index : null;
+  const firstFailedSequenceNumber = errors.length > 0 ? errors[0].sequenceNumber : null;
   return {
     valid: errors.length === 0,
     errors,
     firstFailedIndex,
+    firstFailedSequenceNumber,
+  };
+}
+
+/**
+ * Verify a local hash chain against an independently stored, trusted checkpoint.
+ *
+ * A local hash chain alone cannot reliably detect deletion of its entire latest
+ * suffix without an independent trusted reference (e.g. from an Ed25519 checkpoint
+ * or blockchain commitment). This function verifies internal consistency AND detects
+ * tail truncations against the trusted checkpoint boundaries.
+ *
+ * @param {object[]} events - Local log events array.
+ * @param {object} checkpoint - Trusted checkpoint document.
+ * @returns {ChainVerificationResult} Verification result.
+ */
+export function verifyHashChainWithCheckpoint(events, checkpoint) {
+  // First run local internal consistency checks
+  const localResult = verifyHashChain(events);
+  const errors = [...localResult.errors];
+
+  if (!checkpoint || typeof checkpoint !== 'object') {
+    errors.push({
+      index: -1,
+      sequenceNumber: undefined,
+      sequence: undefined,
+      type: 'INVALID_CHECKPOINT',
+      reason: 'Missing or malformed checkpoint document for boundary verification',
+    });
+    return {
+      valid: false,
+      errors,
+      firstFailedIndex: errors[0]?.index ?? null,
+      firstFailedSequenceNumber: errors[0]?.sequenceNumber ?? null,
+    };
+  }
+
+  const expectedStart = checkpoint.start_sequence ?? checkpoint.firstSequenceNumber ?? checkpoint.startSequence;
+  const expectedEnd = checkpoint.end_sequence ?? checkpoint.lastSequenceNumber ?? checkpoint.endSequence;
+  const expectedCount = checkpoint.event_count ?? checkpoint.totalEvents ?? checkpoint.eventCount;
+  const expectedHead = checkpoint.chain_head_hash ?? checkpoint.chainHeadHash ?? checkpoint.headHash;
+
+  if (events.length === 0) {
+    if (expectedCount > 0) {
+      errors.push({
+        index: 0,
+        sequenceNumber: expectedStart,
+        sequence: expectedStart,
+        type: 'COMPLETE_TRUNCATION',
+        reason: `Local chain is empty, but checkpoint expects ${expectedCount} events from seq ${expectedStart} to ${expectedEnd}`,
+      });
+    }
+    return {
+      valid: errors.length === 0,
+      errors,
+      firstFailedIndex: errors.length > 0 ? 0 : null,
+      firstFailedSequenceNumber: errors.length > 0 ? expectedStart : null,
+    };
+  }
+
+  // Check event count
+  if (expectedCount !== undefined && events.length !== Number(expectedCount)) {
+    errors.push({
+      index: events.length - 1,
+      sequenceNumber: events[events.length - 1].sequence_number,
+      sequence: events[events.length - 1].sequence_number,
+      type: 'TAIL_TRUNCATION',
+      reason: `Event count mismatch: local events (${events.length}) ≠ checkpoint expected (${expectedCount})`,
+    });
+  }
+
+  // Check ending sequence number
+  const lastEvent = events[events.length - 1];
+  if (expectedEnd !== undefined && Number(lastEvent.sequence_number) !== Number(expectedEnd)) {
+    errors.push({
+      index: events.length - 1,
+      sequenceNumber: lastEvent.sequence_number,
+      sequence: lastEvent.sequence_number,
+      type: 'TAIL_TRUNCATION',
+      reason: `Tail truncation detected: last local sequence (${lastEvent.sequence_number}) < checkpoint end_sequence (${expectedEnd})`,
+    });
+  }
+
+  // Check chain head hash
+  if (expectedHead !== undefined && lastEvent.current_hash !== expectedHead) {
+    errors.push({
+      index: events.length - 1,
+      sequenceNumber: lastEvent.sequence_number,
+      sequence: lastEvent.sequence_number,
+      type: 'CHAIN_HEAD_MISMATCH',
+      reason: `Chain head mismatch: local tip "${lastEvent.current_hash}" ≠ checkpoint chain_head_hash "${expectedHead}"`,
+    });
+  }
+
+  const firstFailedIndex = errors.length > 0 ? (errors[0].index >= 0 ? errors[0].index : 0) : null;
+  const firstFailedSequenceNumber = errors.length > 0 ? errors[0].sequenceNumber : null;
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    firstFailedIndex,
+    firstFailedSequenceNumber,
   };
 }
 
