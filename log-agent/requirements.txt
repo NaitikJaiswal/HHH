@@ -1,3 +1,0 @@
-# LOGN Intelligent Log Collection & Forensic Platform Dependencies
-cryptography>=41.0.0
-pydantic>=2.0.0
