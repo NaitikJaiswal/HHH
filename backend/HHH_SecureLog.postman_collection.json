@@ -1,0 +1,289 @@
+{
+  "info": {
+    "name": "HHH (SecureLog) Backend API Collection",
+    "_postman_id": "hhh-securelog-backend-collection-v1",
+    "description": "Postman API test collection for HHH (Hash. Hunt. Harden.) - SecureLog Tamper-Evident Forensic Logging Platform",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000", "type": "string" },
+    { "key": "authToken", "value": "", "type": "string" },
+    { "key": "collectorKey", "value": "default_collector_secret_key", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Health & Server Info",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health"
+          }
+        },
+        {
+          "name": "Platform Info",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Authentication",
+      "item": [
+        {
+          "name": "Register User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Security Analyst\",\n  \"email\": \"analyst@securelog.io\",\n  \"password\": \"SecurePass123!\",\n  \"role\": \"security_analyst\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/register"
+          }
+        },
+        {
+          "name": "Login User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"analyst@securelog.io\",\n  \"password\": \"SecurePass123!\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/login"
+          }
+        },
+        {
+          "name": "Get Current Profile (Me)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{baseUrl}}/api/auth/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Log Management & Ingestion",
+      "item": [
+        {
+          "name": "Ingest Single Log",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-Key", "value": "{{collectorKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"evt-demo-101\",\n  \"sourceId\": \"srv-web-prod-01\",\n  \"eventType\": \"AUTH_FAILURE\",\n  \"message\": \"Repeated failed SSH authentication for root from 192.168.1.50\",\n  \"metadata\": {\n    \"port\": 22,\n    \"attemptCount\": 5\n  },\n  \"timestamp\": \"2026-11-20T12:00:00Z\"\n}"
+            },
+            "url": "{{baseUrl}}/api/logs"
+          }
+        },
+        {
+          "name": "Ingest Log Batch (Python Collector Format)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{collectorKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"collector_id\": \"logn-agent-linux-01\",\n  \"batch_size\": 2,\n  \"events\": [\n    {\n      \"event_id\": \"evt-batch-001\",\n      \"source_id\": \"srv-web-prod-01\",\n      \"event_type\": \"FILE_MODIFIED\",\n      \"message\": \"/etc/passwd modified by process 1024\",\n      \"timestamp\": \"2026-11-20T12:01:00Z\"\n    },\n    {\n      \"event_id\": \"evt-batch-002\",\n      \"source_id\": \"srv-web-prod-01\",\n      \"event_type\": \"SERVICE_RESTARTED\",\n      \"message\": \"sshd daemon restarted by supervisor\",\n      \"timestamp\": \"2026-11-20T12:02:00Z\"\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/logs"
+          }
+        },
+        {
+          "name": "Search & Filter Logs",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{baseUrl}}/api/logs?sourceId=srv-web-prod-01&page=1&limit=20"
+          }
+        },
+        {
+          "name": "Get Log Statistics",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{baseUrl}}/api/logs/stats"
+          }
+        },
+        {
+          "name": "Get Log Details by Event ID",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{baseUrl}}/api/logs/evt-demo-101"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Cryptographic Integrity & Checkpoints",
+      "item": [
+        {
+          "name": "Trigger Integrity Audit",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceId\": \"srv-web-prod-01\"\n}"
+            },
+            "url": "{{baseUrl}}/api/integrity/verify"
+          }
+        },
+        {
+          "name": "Get Overall System Integrity Status",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{baseUrl}}/api/integrity/status"
+          }
+        },
+        {
+          "name": "List Signed Checkpoints",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{baseUrl}}/api/integrity/checkpoints?sourceId=srv-web-prod-01"
+          }
+        },
+        {
+          "name": "Generate Signed Ed25519 Checkpoint",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceId\": \"srv-web-prod-01\"\n}"
+            },
+            "url": "{{baseUrl}}/api/integrity/checkpoints"
+          }
+        },
+        {
+          "name": "Get Active Security Alerts",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{baseUrl}}/api/integrity/alerts"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Security Incidents",
+      "item": [
+        {
+          "name": "List Incidents",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{baseUrl}}/api/incidents?page=1&limit=20"
+          }
+        },
+        {
+          "name": "Get Incident by ID",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{baseUrl}}/api/incidents/inc-sample-id"
+          }
+        },
+        {
+          "name": "Update Incident Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"RESOLVED\",\n  \"resolutionNotes\": \"Investigated log gap. Verified scheduled maintenance window was authorized by change ticket #982.\"\n}"
+            },
+            "url": "{{baseUrl}}/api/incidents/inc-sample-id/status"
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Dashboard APIs",
+      "item": [
+        {
+          "name": "Get Dashboard Statistics",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{baseUrl}}/api/dashboard/stats"
+          }
+        },
+        {
+          "name": "Get Dashboard Activity Timeline",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{baseUrl}}/api/dashboard/activity?limit=15"
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Sources & Collector Heartbeat",
+      "item": [
+        {
+          "name": "Register Log Source",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceId\": \"linux-node-02\",\n  \"name\": \"Linux Gateway Server\",\n  \"sourceType\": \"linux\"\n}"
+            },
+            "url": "{{baseUrl}}/api/sources"
+          }
+        },
+        {
+          "name": "List Log Sources",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": "{{baseUrl}}/api/sources"
+          }
+        },
+        {
+          "name": "Emit Collector Heartbeat",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-API-Key", "value": "{{collectorKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"collector_id\": \"logn-agent-linux-01\",\n  \"host_id\": \"linux-node-02\",\n  \"status\": \"HEALTHY\",\n  \"last_delivered_sequence\": 10,\n  \"pending_events_count\": 0,\n  \"uptime_seconds\": 3600\n}"
+            },
+            "url": "{{baseUrl}}/api/sources/linux-node-02/heartbeat"
+          }
+        }
+      ]
+    }
+  ]
+}
