@@ -8,7 +8,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "test": "node --test tests/canonicalJson.test.js tests/hashing.test.js tests/hashChain.test.js"
+    "test": "node --test tests/canonicalJson.test.js tests/hashing.test.js tests/hashChain.test.js tests/merkleTree.test.js tests/keyManager.test.js tests/checkpointService.test.js tests/verifier.test.js"
   },
   "keywords": [
     "security",
