@@ -78,6 +78,8 @@ export function verifyHashChain(events) {
     errors.push({
       index: 0,
       sequenceNumber: firstEvent.sequence_number,
+      sequence: firstEvent.sequence_number,
+      type: 'GENESIS_MISMATCH',
       reason: `First event previous_hash is "${firstEvent.previous_hash}" but expected GENESIS_HASH (64 zeros)`,
     });
   }
@@ -94,6 +96,8 @@ export function verifyHashChain(events) {
       errors.push({
         index: i,
         sequenceNumber: seqNum,
+        sequence: seqNum,
+        type: 'HASH_ERROR',
         reason: `hashLogEvent threw for event at index ${i}: ${err.message}`,
       });
       // Cannot proceed with link check for this event
@@ -104,6 +108,8 @@ export function verifyHashChain(events) {
       errors.push({
         index: i,
         sequenceNumber: seqNum,
+        sequence: seqNum,
+        type: 'HASH_MISMATCH',
         reason: `Hash mismatch at index ${i}: recomputed "${recomputedHash}" ≠ stored "${event.current_hash}"`,
       });
     }
@@ -115,6 +121,8 @@ export function verifyHashChain(events) {
         errors.push({
           index: i,
           sequenceNumber: seqNum,
+          sequence: seqNum,
+          type: 'LINK_MISMATCH',
           reason: `Broken chain link at index ${i}: previous_hash "${event.previous_hash}" ≠ preceding event current_hash "${prevEvent.current_hash}"`,
         });
       }
@@ -128,6 +136,8 @@ export function verifyHashChain(events) {
         errors.push({
           index: i,
           sequenceNumber: seqNum,
+          sequence: seqNum,
+          type: 'SEQUENCE_GAP',
           reason: `Sequence number gap at index ${i}: expected ${expectedSeq}, got ${seqNum}`,
         });
       }

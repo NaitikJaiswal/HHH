@@ -189,7 +189,7 @@ export function createCheckpoint(input, keyManager) {
   // ── Assemble unsigned checkpoint ────────────────────────────────────────────
   const checkpoint = {
     schema_version:      CHECKPOINT_SCHEMA_VERSION,
-    checkpoint_id:       generateUuidV4(),
+    checkpoint_id:       input.checkpoint_id || generateUuidV4(),
     source_id,
     start_sequence,
     end_sequence,

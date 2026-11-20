@@ -12,7 +12,9 @@
     "test:contracts": "HARDHAT_DISABLE_TELEMETRY=true HARDHAT_ENABLE_TELEMETRY=false npx hardhat test --config blockchain/hardhat.config.js",
     "test:all": "npm test && npm run test:contracts",
     "compile": "HARDHAT_DISABLE_TELEMETRY=true HARDHAT_ENABLE_TELEMETRY=false npx hardhat compile --config blockchain/hardhat.config.js",
-    "deploy:local": "HARDHAT_DISABLE_TELEMETRY=true HARDHAT_ENABLE_TELEMETRY=false npx hardhat run blockchain/scripts/deploy.js --config blockchain/hardhat.config.js"
+    "deploy:local": "HARDHAT_DISABLE_TELEMETRY=true HARDHAT_ENABLE_TELEMETRY=false npx hardhat run blockchain/scripts/deploy.js --config blockchain/hardhat.config.js",
+    "demo": "HARDHAT_DISABLE_TELEMETRY=true HARDHAT_ENABLE_TELEMETRY=false npx hardhat run scripts/demo.js --config blockchain/hardhat.config.js",
+    "benchmark": "node scripts/benchmark.js"
   },
   "keywords": [
     "security",
