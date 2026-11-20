@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import TopBar from './components/TopBar';
 import NavigationRail from './components/NavigationRail';
-import NodeDetailDrawer from './components/NodeDetailDrawer';
+import NodeDetailPanel from './components/NodeDetailPanel';
 import AuthModal from './components/AuthModal';
 
 // 10 Command Modules
@@ -18,14 +18,14 @@ import Settings from './pages/Settings';
 
 // Forensic Store Data
 import { 
-  INITIAL_CONSTELLATION_NODES, 
-  INITIAL_CONSTELLATION_LINKS 
+  FORENSIC_NODES, 
+  FORENSIC_LINKS 
 } from './services/forensicStore';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
-  const [nodes, setNodes] = useState(INITIAL_CONSTELLATION_NODES);
-  const [links, setLinks] = useState(INITIAL_CONSTELLATION_LINKS);
+  const [nodes, setNodes] = useState(FORENSIC_NODES);
+  const [links, setLinks] = useState(FORENSIC_LINKS);
   const [selectedNode, setSelectedNode] = useState(null);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
 
@@ -36,28 +36,27 @@ export default function App() {
     // Create automatic hash node for the new evidence
     const hashNode = {
       id: `HSH-${newEvidence.id}`,
-      category: 'HASH',
       name: `SHA-256 (${newEvidence.name})`,
       label: `SHA256:${newEvidence.hash.slice(0, 8)}...`,
+      category: 'HASH',
+      algorithm: 'SHA-256',
       hash: newEvidence.hash,
       status: 'VERIFIED',
-      algorithm: 'SHA-256',
       verifiedAt: new Date().toISOString(),
       targetEvidence: newEvidence.id,
-      x: newEvidence.x + (Math.random() - 0.5) * 15,
-      y: newEvidence.y + (Math.random() - 0.5) * 15,
-      z: newEvidence.z + (Math.random() - 0.5) * 15,
+      x: newEvidence.x + (Math.random() - 0.5) * 12,
+      y: newEvidence.y + (Math.random() - 0.5) * 12,
+      z: newEvidence.z + (Math.random() - 0.5) * 12,
     };
 
     setNodes((prev) => [hashNode, ...prev]);
 
-    // Link evidence to its hash
-    const link = {
-      from: newEvidence.id,
-      to: hashNode.id,
-      type: 'GENERATES_HASH',
-    };
-    setLinks((prev) => [...prev, link]);
+    // Link evidence to its hash and to core
+    const newLinks = [
+      { from: newEvidence.id, to: 'CORE', type: 'RADIAL' },
+      { from: newEvidence.id, to: hashNode.id, type: 'HASH' },
+    ];
+    setLinks((prev) => [...prev, ...newLinks]);
   };
 
   const renderActiveTab = () => {
@@ -137,8 +136,8 @@ export default function App() {
         </main>
       </div>
 
-      {/* Contextual 3D Node Detail Drawer */}
-      <NodeDetailDrawer
+      {/* Contextual 3D Node Detail Panel */}
+      <NodeDetailPanel
         node={selectedNode}
         onClose={() => setSelectedNode(null)}
         onNavigateTab={setActiveTab}
