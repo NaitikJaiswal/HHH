@@ -1,21 +1,23 @@
 /**
  * Central Forensic Store for HHH (Hash. Hunt. Harden.)
- * Holds the unified multi-node forensic universe:
- * 1. Evidence Nodes
- * 2. Hash Nodes
- * 3. Merkle Nodes
- * 4. Blockchain Nodes
- * 5. Threat Nodes
- * 6. Investigation Nodes
+ * Holds the unified multi-node forensic universe matching the exact node specifications:
+ * - Geometric faceted polyhedrons (Dodecahedrons with flat shading)
+ * - Identifiers: APP-2025-ER0-3398, APP-2025-SR0-2290, APP-2025-WR0-0512, etc.
+ * - Subtitles: Location • Risk: XX
+ * - Featured Hero Node: Emerald Green faceted polyhedron in core focus
  */
 
 export const INITIAL_CONSTELLATION_NODES = [
-  // 1. Evidence Nodes
+  // 1. Featured Core Node (Vivid Emerald Green Faceted Polyhedron)
   {
-    id: 'EVD-9801',
-    category: 'EVIDENCE',
+    id: 'APP-2025-ER0-3398',
+    code: 'APP-2025-ER0-3398',
     name: 'memdump_srv01.raw',
     label: 'RAM Dump SVR-01',
+    location: 'Kolkata',
+    riskScore: 20,
+    category: 'EVIDENCE',
+    isHero: true, // Vivid Emerald Green
     type: 'Memory Image',
     size: '4.29 GB',
     source: 'CORP-WIN-DC01',
@@ -24,13 +26,18 @@ export const INITIAL_CONSTELLATION_NODES = [
     status: 'VERIFIED',
     caseId: 'CASE-2026-08',
     custody: ['Agent Smith (Acquisition)', 'Evidence Vault (Enclave Ingest)'],
-    x: -35, y: 15, z: -20,
+    x: 2, y: -4, z: 10,
   },
+
+  // 2. Front Left Node
   {
-    id: 'EVD-9802',
-    category: 'EVIDENCE',
+    id: 'APP-2025-SR0-2290',
+    code: 'APP-2025-SR0-2290',
     name: 'auth_audit.log',
     label: 'Syslog Auth Stream',
+    location: 'Coimbatore',
+    riskScore: 15,
+    category: 'EVIDENCE',
     type: 'Audit Log',
     size: '142 MB',
     source: 'prod-k8s-ingress-02',
@@ -39,13 +46,18 @@ export const INITIAL_CONSTELLATION_NODES = [
     status: 'VERIFIED',
     caseId: 'CASE-2026-08',
     custody: ['Linux Auditd Daemon', 'SecureLog Shipper'],
-    x: -25, y: -20, z: 15,
+    x: -24, y: -6, z: 8,
   },
+
+  // 3. Front Right Node
   {
-    id: 'EVD-9803',
-    category: 'EVIDENCE',
+    id: 'APP-2025-WR0-0512',
+    code: 'APP-2025-WR0-0512',
     name: 'exfil_traffic.pcap',
     label: 'Network PCAP Capture',
+    location: 'Veermata',
+    riskScore: 30,
+    category: 'EVIDENCE',
     type: 'Packet Capture',
     size: '890 MB',
     source: 'Core Switch SW-04',
@@ -54,13 +66,18 @@ export const INITIAL_CONSTELLATION_NODES = [
     status: 'VERIFIED',
     caseId: 'CASE-2026-09',
     custody: ['Network TAP Probe', 'Evidence Enclave'],
-    x: -40, y: -5, z: -10,
+    x: 24, y: -16, z: 6,
   },
+
+  // 4. Upper Right Node
   {
-    id: 'EVD-9804',
-    category: 'EVIDENCE',
+    id: 'APP-2025-NR0-1104',
+    code: 'APP-2025-NR0-1104',
     name: 'security_headers.conf',
     label: 'NGINX Config File',
+    location: 'Delhi',
+    riskScore: 50,
+    category: 'EVIDENCE',
     type: 'Configuration',
     size: '12 KB',
     source: 'prod-k8s-ingress-02',
@@ -70,203 +87,162 @@ export const INITIAL_CONSTELLATION_NODES = [
     anomaly: 'UNAUTHORIZED_ALTERATION',
     caseId: 'CASE-2026-09',
     custody: ['File Integrity Monitor'],
-    x: -20, y: 30, z: 25,
+    x: 32, y: 16, z: -8,
   },
 
-  // 2. Hash Nodes (Fingerprints & Integrity)
+  // 5. Mid-Right Node
   {
-    id: 'HSH-01',
-    category: 'HASH',
+    id: 'APP-2025-WR0-0491',
+    code: 'APP-2025-WR0-0491',
     name: 'SHA-256 (EVD-9801)',
     label: 'SHA256:a57e3f...03fc',
+    location: 'Veermata',
+    riskScore: 52,
+    category: 'HASH',
     hash: 'a57e3f89d0c2e9b114d7a12b6f10c376189bb51e44a6ec588e390c9b60d703fc',
     status: 'VERIFIED',
     algorithm: 'SHA-256',
     verifiedAt: '2026-11-20T14:12:05Z',
-    targetEvidence: 'EVD-9801',
-    x: -15, y: 10, z: -15,
+    targetEvidence: 'APP-2025-ER0-3398',
+    x: 21, y: 7, z: -2,
   },
+
+  // 6. Far-Right Node
   {
-    id: 'HSH-02',
-    category: 'HASH',
+    id: 'APP-2025-NR0-1349',
+    code: 'APP-2025-NR0-1349',
     name: 'SHA-256 (EVD-9802)',
     label: 'SHA256:7c891e...c19a',
+    location: 'Delhi',
+    riskScore: 35,
+    category: 'HASH',
     hash: '7c891e4b31a0dc6790bcf42a9816e883dc14f09148d56b2cfd01e4a5b678c19a',
     status: 'VERIFIED',
     algorithm: 'SHA-256',
     verifiedAt: '2026-11-20T14:28:32Z',
-    targetEvidence: 'EVD-9802',
-    x: -10, y: -12, z: 10,
-  },
-  {
-    id: 'HSH-03',
-    category: 'HASH',
-    name: 'SHA-256 (EVD-9803)',
-    label: 'SHA256:22b7a0...9e41',
-    hash: '22b7a0c918ef91024bdca601e309f874cbe90184b901aef09c123498bcf09e41',
-    status: 'VERIFIED',
-    algorithm: 'SHA-256',
-    verifiedAt: '2026-11-20T15:02:15Z',
-    targetEvidence: 'EVD-9803',
-    x: -18, y: -2, z: -5,
-  },
-  {
-    id: 'HSH-04',
-    category: 'HASH',
-    name: 'SHA-256 (EVD-9804)',
-    label: 'SHA256:e45b91...5241',
-    hash: 'e45b91a700192837461524354657687980a9b8c7d6e5f4019283746574635241',
-    status: 'FAILED',
-    algorithm: 'SHA-256',
-    verifiedAt: '2026-11-20T15:45:02Z',
-    targetEvidence: 'EVD-9804',
-    x: -8, y: 22, z: 18,
+    targetEvidence: 'APP-2025-SR0-2290',
+    x: 32, y: -4, z: -10,
   },
 
-  // 3. Merkle Nodes (Hierarchical Tree & Roots)
+  // 7. Upper Center Node
   {
-    id: 'MRK-TREE-88',
-    category: 'MERKLE',
+    id: 'APP-2025-WR0-0677',
+    code: 'APP-2025-WR0-0677',
     name: 'Merkle Root Batch #88',
     label: 'Root: 7e2c99b2...',
+    location: 'Veermata',
+    riskScore: 8,
+    category: 'MERKLE',
     hash: '7e2c99b244670f5e714652434688d8b375b4aa23f81e33054e1abf192b0051e8',
     status: 'ANCHORED',
     batchSize: 400,
     depth: 4,
-    leavesAnchored: ['EVD-9801', 'EVD-9802', 'EVD-9803'],
-    x: 10, y: 0, z: -5,
-  },
-  {
-    id: 'MRK-PARENT-01',
-    category: 'MERKLE',
-    name: 'Intermediate Hash H(L1, L2)',
-    label: 'Node: d41d8cd9...',
-    hash: 'd41d8cd98f00b204e9800998ecf8427e01293847102938471029384710293847',
-    status: 'VERIFIED',
-    x: 0, y: 5, z: -8,
+    x: 13, y: 13, z: -14,
   },
 
-  // 4. Blockchain Nodes (Immutable Ledger References)
+  // 8. Mid Center Node
   {
-    id: 'BLK-TX-901',
-    category: 'BLOCKCHAIN',
-    name: 'Ethereum Sepolia Anchor',
-    label: 'Block #7219402 [0x91f8...]',
-    txHash: '0x91f893e110cb84a9194e8234abcf90128475cdafe89104bce9013857102948ca',
-    blockNumber: 7219402,
-    network: 'Ethereum Sepolia (EVM)',
-    smartContract: '0x4f8287e07664B34eF2a3733A0B1c5f0f35492dE8',
-    gasUsed: '42,108',
-    status: 'ANCHORED',
-    timestamp: '2026-11-20T15:10:00Z',
-    anchoredRoot: '7e2c99b244670f5e714652434688d8b375b4aa23f81e33054e1abf192b0051e8',
-    x: 35, y: -8, z: -12,
-  },
-  {
-    id: 'BLK-TX-900',
-    category: 'BLOCKCHAIN',
-    name: 'Forensic Consortium Ledger',
+    id: 'APP-2025-NR0-1188',
+    code: 'APP-2025-NR0-1188',
+    name: 'Consortium Block #44190',
     label: 'Consortium Block #44190',
+    location: 'Delhi',
+    riskScore: 8,
+    category: 'BLOCKCHAIN',
     txHash: '0x12b8901823094810293840192834019283401928340192834019283401928340',
     blockNumber: 44190,
     network: 'Hyperledger Besu Consortium',
-    smartContract: '0x9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b',
-    gasUsed: '21,000',
     status: 'ANCHORED',
-    timestamp: '2026-11-20T14:45:00Z',
-    anchoredRoot: '4b889fa1019348eabf091824908123049bcafe90184910283490182490182390',
-    x: 32, y: 18, z: 10,
+    x: -3, y: 9, z: -10,
   },
 
-  // 5. Threat Nodes (Suspicious Events & Anomalies)
+  // 9. Mid Left Center Node
   {
-    id: 'THR-701',
-    category: 'THREAT',
-    name: 'Tamper Alert: Config Hash Mismatch',
-    label: 'Integrity Violation (EVD-9804)',
-    severity: 'CRITICAL',
-    technique: 'T1562.001 - Impair Defenses',
-    status: 'FAILED',
-    anomalyType: 'HASH_MISMATCH',
-    targetEvidence: 'EVD-9804',
-    source: 'prod-k8s-ingress-02',
-    timestamp: '2026-11-20T15:45:10Z',
-    caseId: 'CASE-2026-09',
-    description: 'Calculated hash differs from immutable blockchain-anchored manifest.',
-    x: -5, y: 35, z: 15,
+    id: 'APP-2025-SW0-4411',
+    code: 'APP-2025-SW0-4411',
+    name: 'Ethereum Sepolia Anchor',
+    label: 'Block #7219402',
+    location: 'Bengaluru',
+    riskScore: 15,
+    category: 'BLOCKCHAIN',
+    txHash: '0x91f893e110cb84a9194e8234abcf90128475cdafe89104bce9013857102948ca',
+    blockNumber: 7219402,
+    network: 'Ethereum Sepolia (EVM)',
+    status: 'ANCHORED',
+    x: -14, y: 9, z: -8,
   },
+
+  // 10. Top Center Node
   {
-    id: 'THR-702',
+    id: 'APP-2025-SW0-4482',
+    code: 'APP-2025-SW0-4482',
+    name: 'Audit Sequence Gap #148920',
+    label: 'Sequence Gap #148920',
+    location: 'Bengaluru',
+    riskScore: 0,
     category: 'THREAT',
-    name: 'Missing Sequence Gap #148920',
-    label: 'Audit Sequence Gap Detected',
     severity: 'SUSPICIOUS',
     technique: 'T1070.006 - Indicator Removal',
     status: 'SUSPICIOUS',
-    anomalyType: 'SEQUENCE_GAP',
-    source: 'prod-k8s-ingress-02',
-    timestamp: '2026-11-20T14:32:00Z',
-    caseId: 'CASE-2026-08',
-    description: 'Gap detected in event numbering stream between #148919 and #148921.',
-    x: -12, y: -32, z: 5,
+    x: 4, y: 20, z: -18,
   },
 
-  // 6. Investigation Nodes (Cases & Collections)
+  // 11. Upper Left Node
   {
-    id: 'CASE-2026-08',
-    category: 'INVESTIGATION',
+    id: 'APP-2025-SR0-2415',
+    code: 'APP-2025-SR0-2415',
+    name: 'Tamper Alert: Config Hash Mismatch',
+    label: 'Integrity Violation',
+    location: 'Coimbatore',
+    riskScore: 15,
+    category: 'THREAT',
+    severity: 'CRITICAL',
+    technique: 'T1562.001 - Impair Defenses',
+    status: 'FAILED',
+    x: -22, y: 17, z: -16,
+  },
+
+  // 12. Mid Left Node
+  {
+    id: 'APP-2025-ER0-3341',
+    code: 'APP-2025-ER0-3341',
     name: 'Operation DarkVessel',
-    label: 'Case #2026-08: DarkVessel',
+    label: 'Case #2026-08',
+    location: 'Kolkata',
+    riskScore: 15,
+    category: 'INVESTIGATION',
     priority: 'P1-CRITICAL',
     status: 'ACTIVE',
-    leadAnalyst: 'Agent A. Vance',
-    assignedTeam: 'Red Team Forensics',
-    evidenceCount: 3,
-    openedAt: '2026-11-20T13:00:00Z',
-    x: 5, y: -25, z: 22,
+    x: -34, y: 3, z: -4,
   },
+
+  // 13. Lower Left Node
   {
-    id: 'CASE-2026-09',
-    category: 'INVESTIGATION',
+    id: 'APP-2025-SR0-2201',
+    code: 'APP-2025-SR0-2201',
     name: 'Incident CobaltBreeze',
-    label: 'Case #2026-09: CobaltBreeze',
+    label: 'Case #2026-09',
+    location: 'Coimbatore',
+    riskScore: 15,
+    category: 'INVESTIGATION',
     priority: 'P2-HIGH',
     status: 'ACTIVE',
-    leadAnalyst: 'Agent M. Chen',
-    assignedTeam: 'SOC Alpha',
-    evidenceCount: 2,
-    openedAt: '2026-11-20T14:50:00Z',
-    x: 8, y: 28, z: -10,
+    x: -28, y: -16, z: 2,
   },
 ];
 
 export const INITIAL_CONSTELLATION_LINKS = [
-  // Evidence -> Hash
-  { from: 'EVD-9801', to: 'HSH-01', type: 'GENERATES_HASH' },
-  { from: 'EVD-9802', to: 'HSH-02', type: 'GENERATES_HASH' },
-  { from: 'EVD-9803', to: 'HSH-03', type: 'GENERATES_HASH' },
-  { from: 'EVD-9804', to: 'HSH-04', type: 'GENERATES_HASH' },
-
-  // Hashes -> Merkle Level
-  { from: 'HSH-01', to: 'MRK-PARENT-01', type: 'LEAF_TO_PARENT' },
-  { from: 'HSH-02', to: 'MRK-PARENT-01', type: 'LEAF_TO_PARENT' },
-  { from: 'MRK-PARENT-01', to: 'MRK-TREE-88', type: 'PARENT_TO_ROOT' },
-  { from: 'HSH-03', to: 'MRK-TREE-88', type: 'LEAF_TO_ROOT' },
-
-  // Merkle Root -> Blockchain Anchor
-  { from: 'MRK-TREE-88', to: 'BLK-TX-901', type: 'BLOCKCHAIN_ANCHOR' },
-
-  // Threats -> Evidence & Cases
-  { from: 'THR-701', to: 'EVD-9804', type: 'TAMPER_DETECTED' },
-  { from: 'THR-701', to: 'CASE-2026-09', type: 'LINKED_TO_CASE' },
-  { from: 'THR-702', to: 'EVD-9802', type: 'SEQUENCE_GAP' },
-  { from: 'THR-702', to: 'CASE-2026-08', type: 'LINKED_TO_CASE' },
-
-  // Investigations -> Evidence
-  { from: 'CASE-2026-08', to: 'EVD-9801', type: 'INCLUDES_EVIDENCE' },
-  { from: 'CASE-2026-08', to: 'EVD-9802', type: 'INCLUDES_EVIDENCE' },
-  { from: 'CASE-2026-09', to: 'EVD-9803', type: 'INCLUDES_EVIDENCE' },
-  { from: 'CASE-2026-09', to: 'EVD-9804', type: 'INCLUDES_EVIDENCE' },
+  { from: 'APP-2025-ER0-3398', to: 'APP-2025-SR0-2290', type: 'EVIDENCE_LINK' },
+  { from: 'APP-2025-ER0-3398', to: 'APP-2025-WR0-0512', type: 'EVIDENCE_LINK' },
+  { from: 'APP-2025-ER0-3398', to: 'APP-2025-WR0-0491', type: 'HASH_LINK' },
+  { from: 'APP-2025-SR0-2290', to: 'APP-2025-SW0-4411', type: 'CONSORTIUM_LINK' },
+  { from: 'APP-2025-WR0-0491', to: 'APP-2025-WR0-0677', type: 'MERKLE_LINK' },
+  { from: 'APP-2025-WR0-0512', to: 'APP-2025-NR0-1349', type: 'HASH_LINK' },
+  { from: 'APP-2025-NR0-1104', to: 'APP-2025-WR0-0491', type: 'INVESTIGATION_LINK' },
+  { from: 'APP-2025-SW0-4482', to: 'APP-2025-SW0-4411', type: 'THREAT_LINK' },
+  { from: 'APP-2025-SR0-2415', to: 'APP-2025-ER0-3341', type: 'THREAT_LINK' },
+  { from: 'APP-2025-ER0-3341', to: 'APP-2025-SR0-2201', type: 'CASE_LINK' },
+  { from: 'APP-2025-SR0-2201', to: 'APP-2025-SR0-2290', type: 'EVIDENCE_LINK' },
 ];
 
 export const INITIAL_AUDIT_TRAIL = [
@@ -274,7 +250,7 @@ export const INITIAL_AUDIT_TRAIL = [
     id: 'AUD-001',
     actor: 'Agent A. Vance',
     action: 'EVIDENCE_INGESTED',
-    resource: 'EVD-9801 (memdump_srv01.raw)',
+    resource: 'APP-2025-ER0-3398 (memdump_srv01.raw)',
     timestamp: '2026-11-20T14:12:00Z',
     prevHash: '0000000000000000000000000000000000000000000000000000000000000000',
     recordHash: '8b9c018239012384901283409128304918230948120938410293841029384102',
@@ -284,7 +260,7 @@ export const INITIAL_AUDIT_TRAIL = [
     id: 'AUD-002',
     actor: 'Cryptographic HSM Engine',
     action: 'HASH_GENERATED_SHA256',
-    resource: 'HSH-01 (a57e3f89...)',
+    resource: 'APP-2025-WR0-0491 (a57e3f89...)',
     timestamp: '2026-11-20T14:12:05Z',
     prevHash: '8b9c018239012384901283409128304918230948120938410293841029384102',
     recordHash: 'f42a9816e883dc14f09148d56b2cfd01e4a5b678c19a7c891e4b31a0dc6790bc',
@@ -294,7 +270,7 @@ export const INITIAL_AUDIT_TRAIL = [
     id: 'AUD-003',
     actor: 'Merkle Batcher Service',
     action: 'MERKLE_TREE_SEALED',
-    resource: 'MRK-TREE-88 (Root: 7e2c99b2...)',
+    resource: 'APP-2025-WR0-0677 (Root: 7e2c99b2...)',
     timestamp: '2026-11-20T15:05:00Z',
     prevHash: 'f42a9816e883dc14f09148d56b2cfd01e4a5b678c19a7c891e4b31a0dc6790bc',
     recordHash: '33a9018409123847102938471029384710293847102938471029384710293847',
@@ -304,7 +280,7 @@ export const INITIAL_AUDIT_TRAIL = [
     id: 'AUD-004',
     actor: 'Ethereum Anchor Relay',
     action: 'BLOCKCHAIN_TRANSACTION_CONFIRMED',
-    resource: 'BLK-TX-901 (Sepolia Block #7219402)',
+    resource: 'APP-2025-SW0-4411 (Sepolia Block #7219402)',
     timestamp: '2026-11-20T15:10:00Z',
     prevHash: '33a9018409123847102938471029384710293847102938471029384710293847',
     recordHash: '91f893e110cb84a9194e8234abcf90128475cdafe89104bce9013857102948ca',
@@ -314,7 +290,7 @@ export const INITIAL_AUDIT_TRAIL = [
     id: 'AUD-005',
     actor: 'Integrity Sentinel',
     action: 'TAMPER_ALERT_TRIGGERED',
-    resource: 'THR-701 (EVD-9804 Hash Mismatch)',
+    resource: 'APP-2025-SR0-2415 (Config Hash Mismatch)',
     timestamp: '2026-11-20T15:45:10Z',
     prevHash: '91f893e110cb84a9194e8234abcf90128475cdafe89104bce9013857102948ca',
     recordHash: 'ee48291039481029384019283401928340192834019283401928340192834019',
