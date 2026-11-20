@@ -1,13 +1,32 @@
-# Dependency directories
+
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Node.js dependencies
 node_modules/
 backend/node_modules/
+frontend/node_modules/
 
-# Environment files
+# Environment variables and secrets
 .env
+.env.*
+!.env.example
 .env.local
 .env.*.local
 backend/.env
 backend/.env.local
+frontend/.env
+frontend/.env.local
 
 # Cryptographic keys and secrets
 *.pem
@@ -25,11 +44,11 @@ pnpm-debug.log*
 logs/
 backend/logs/
 
-# Coverage and test output
+# Test and coverage output
 coverage/
 backend/coverage/
 .nyc_output/
 
-# OS files
+# Operating system files
 .DS_Store
 Thumbs.db
