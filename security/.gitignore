@@ -1,0 +1,8 @@
+node_modules/
+*.enc
+signing_key.*
+.env
+.env.local
+coverage/
+*.key
+.DS_Store

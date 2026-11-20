@@ -1,0 +1,22 @@
+{
+  "name": "@hhh/security",
+  "version": "0.1.0",
+  "description": "Security and blockchain module for HHH SecureLog — canonical log hashing, hash chain, Merkle trees, Ed25519 signing, smart-contract anchoring",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "test": "node --test tests/canonicalJson.test.js tests/hashing.test.js tests/hashChain.test.js"
+  },
+  "keywords": [
+    "security",
+    "blockchain",
+    "cryptography",
+    "merkle",
+    "forensics",
+    "tamper-evident"
+  ],
+  "license": "MIT"
+}
