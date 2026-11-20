@@ -178,3 +178,69 @@ test('11. LOGN_HASH_V1_FIELDS contains exactly the 9 specified fields', () => {
     assert.ok(LOGN_HASH_V1_FIELDS.includes(field), `Missing field from LOGN_HASH_V1_FIELDS: "${field}"`);
   }
 });
+
+// ── Versioning & Backward Compatibility Tests ────────────────────────────────
+
+test('12. HASH_SCHEMA_VERSION is LOGN-HASH-v1', async () => {
+  const { HASH_SCHEMA_VERSION, hashLogEventV1 } = await import('../src/crypto/hashing.js');
+  assert.equal(HASH_SCHEMA_VERSION, 'LOGN-HASH-v1');
+  assert.equal(typeof hashLogEventV1, 'function');
+});
+
+test('13. Legacy camelCase payload normalizes to exact same hash as canonical snake_case', async () => {
+  const { hashLogEvent } = await import('../src/crypto/hashing.js');
+  const camelCaseEvent = {
+    eventId:        BASE_EVENT.event_id,
+    eventTime:      BASE_EVENT.event_time,
+    eventType:      BASE_EVENT.event_type,
+    message:         BASE_EVENT.message,
+    metadata:        BASE_EVENT.metadata,
+    previousHash:   BASE_EVENT.previous_hash,
+    sequenceNumber: BASE_EVENT.sequence_number,
+    severity:        BASE_EVENT.severity,
+    sourceId:       BASE_EVENT.source_id,
+  };
+
+  const canonicalHash = hashLogEvent(BASE_EVENT);
+  const camelHash = hashLogEvent(camelCaseEvent);
+  assert.equal(
+    camelHash,
+    canonicalHash,
+    'camelCase event representation must normalize and hash identically to snake_case'
+  );
+});
+
+test('14. Negative sequence_number throws RangeError', async () => {
+  const { hashLogEvent } = await import('../src/crypto/hashing.js');
+  assert.throws(
+    () => hashLogEvent(withFields({ sequence_number: -1 })),
+    RangeError,
+    'Negative sequence number must throw RangeError'
+  );
+});
+
+test('15. Malformed previous_hash (wrong length or non-hex) throws TypeError', async () => {
+  const { hashLogEvent } = await import('../src/crypto/hashing.js');
+  assert.throws(
+    () => hashLogEvent(withFields({ previous_hash: 'too-short' })),
+    TypeError,
+    'previous_hash with invalid length must throw TypeError'
+  );
+  assert.throws(
+    () => hashLogEvent(withFields({ previous_hash: 'z'.repeat(64) })),
+    TypeError,
+    'previous_hash with non-hex characters must throw TypeError'
+  );
+});
+
+test('16. Date object in event_time normalizes to identical hash', async () => {
+  const { hashLogEvent } = await import('../src/crypto/hashing.js');
+  const hashStringTime = hashLogEvent(BASE_EVENT);
+  const hashDateTime = hashLogEvent(withFields({ event_time: new Date('2026-11-20T11:00:00Z') }));
+  assert.equal(
+    hashDateTime,
+    hashStringTime,
+    'Date object event_time must produce identical hash to ISO string'
+  );
+});
+

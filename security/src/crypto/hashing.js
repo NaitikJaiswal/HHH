@@ -1,21 +1,37 @@
 /**
  * @module hashing
- * @description SHA-256 hashing and LOGN-HASH-v1 log event hashing.
+ * @description SHA-256 hashing and versioned LOGN-HASH-v1 log event hashing.
  *
- * Implements the canonical log hash formula defined in:
+ * Implements the authoritative canonical log hash specification defined in:
  *   docs/technical-integration-contract.md §1.3
  *
- * LOGN-HASH-v1 field set (9 fields, snake_case):
- *   event_id, event_time, event_type, message, metadata,
- *   previous_hash, sequence_number, severity, source_id
+ * LOGN-HASH-v1 Specification:
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Schema Version: LOGN-HASH-v1
+ * Field set: Exactly 9 canonical fields (snake_case):
+ *   1. event_id        (string, UUID v4 or alphanumeric string, required)
+ *   2. event_time      (string, ISO-8601 UTC normalized: YYYY-MM-DDTHH:MM:SSZ, required)
+ *   3. event_type      (string, e.g. AUTHENTICATION, SYSTEM, required)
+ *   4. message         (string, human-readable message, required)
+ *   5. metadata        (object, key-value map, optional: defaults to {})
+ *   6. previous_hash   (string, 64-character lowercase hex SHA-256, required)
+ *   7. sequence_number (integer, non-negative monotonic sequence index, required)
+ *   8. severity        (string, e.g. DEBUG, INFO, WARNING, ERROR, CRITICAL, required)
+ *   9. source_id       (string, system or component identifier, required)
  *
- * Key-sort order (Unicode code point ascending):
+ * Key-sort order (UTF-16 code units / Unicode code point ascending):
  *   event_id < event_time < event_type < message < metadata <
  *   previous_hash < sequence_number < severity < source_id
  *
- * Serialization: canonicalJson() from canonicalJson.js
- * Hash algorithm: SHA-256 via Node.js built-in node:crypto
+ * Serialization: canonicalJson() (RFC 8785 compliant)
+ * Hash algorithm: SHA-256 (FIPS 180-4) via Node.js native crypto
  * Output: lowercase hex string, exactly 64 characters
+ * Genesis hash: 64 zero characters ('0' repeated 64 times)
+ *
+ * Backward Compatibility:
+ *   Accepts both canonical snake_case events and legacy camelCase records
+ *   (eventId, sourceId, sequenceNumber, timestamp/eventTime, eventType, previousHash)
+ *   and normalizes them into the authoritative LOGN-HASH-v1 canonical representation.
  */
 
 import { createHash } from 'node:crypto';
@@ -30,9 +46,14 @@ import { canonicalJson, sortKeysDeep } from './canonicalJson.js';
 export const GENESIS_HASH = '0'.repeat(64);
 
 /**
+ * The schema version identifier.
+ *
+ * @type {string}
+ */
+export const HASH_SCHEMA_VERSION = 'LOGN-HASH-v1';
+
+/**
  * The exact 9 field names included in the LOGN-HASH-v1 hash payload.
- * Order here is for reference; the canonicalJson serializer sorts keys
- * independently by Unicode code point.
  *
  * @type {readonly string[]}
  */
@@ -51,9 +72,7 @@ export const LOGN_HASH_V1_FIELDS = Object.freeze([
 /**
  * Compute the SHA-256 digest of a string or Buffer.
  *
- * @param {string | Buffer} data - Input to hash. If a string, it is
- *   encoded as UTF-8 before hashing (matching the LOGN-HASH-v1 requirement
- *   to encode the canonical JSON string as UTF-8 before hashing).
+ * @param {string | Buffer} data - Input to hash. If a string, encoded as UTF-8.
  * @returns {string} Lowercase hexadecimal SHA-256 digest (64 characters).
  */
 export function sha256hex(data) {
@@ -69,24 +88,22 @@ export function sha256hex(data) {
 /**
  * Normalize an ISO-8601 timestamp to the LOGN-HASH-v1 required format:
  *   "YYYY-MM-DDTHH:MM:SSZ"
- *   - No milliseconds
- *   - Always ends with Z (UTC)
+ *   - Strips millisecond precision deterministically per §1.3.1
+ *   - Converted to UTC and always terminated with 'Z'
  *
- * Accepts: ISO-8601 strings with or without milliseconds, with Z or +00:00 suffix.
+ * Accepts: ISO-8601 strings, Date objects, epoch timestamps.
  *
- * @param {string} timestamp - ISO-8601 timestamp string.
- * @returns {string} Normalized timestamp string.
+ * @param {string | Date | number} timestamp - Timestamp to normalize.
+ * @returns {string} Normalized UTC timestamp string.
  * @throws {TypeError} If the timestamp cannot be parsed as a valid date.
  */
-function normalizeTimestamp(timestamp) {
-  // Parse the timestamp to validate it
-  const date = new Date(timestamp);
+export function normalizeTimestamp(timestamp) {
+  const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
   if (isNaN(date.getTime())) {
     throw new TypeError(
       `hashLogEvent: invalid event_time value: "${timestamp}"`
     );
   }
-  // Build YYYY-MM-DDTHH:MM:SSZ manually to avoid any locale/engine differences
   const year  = date.getUTCFullYear();
   const month = String(date.getUTCMonth() + 1).padStart(2, '0');
   const day   = String(date.getUTCDate()).padStart(2, '0');
@@ -97,89 +114,113 @@ function normalizeTimestamp(timestamp) {
 }
 
 /**
- * Compute the LOGN-HASH-v1 hash for a single log event.
+ * Normalize an arbitrary event representation (snake_case or legacy camelCase)
+ * into a validated LOGN-HASH-v1 canonical event payload.
  *
- * Steps (per §1.3.6 pseudocode):
- *   1. Validate all 9 required fields are present (throws if any are missing).
- *   2. Normalize event_time to "YYYY-MM-DDTHH:MM:SSZ" (strip milliseconds, force UTC Z).
- *   3. Build the 9-field LOGN-HASH-v1 payload with correct types:
- *        - sequence_number coerced to integer via Math.trunc(Number(...))
- *        - metadata null/absent → {}
- *        - metadata keys sorted recursively by sortKeysDeep
- *        - all other fields converted to string via String(...)
- *   4. Serialize with canonicalJson() — sorted keys, no whitespace, UTF-8 preserved.
- *   5. Compute SHA-256 of the UTF-8 encoding of the canonical JSON string.
- *   6. Return lowercase hex string (64 characters).
- *
- * This function never logs event contents.
- *
- * @param {object} event - The log event object. Must contain all 9 LOGN-HASH-v1 fields.
- * @param {string} event.event_id - UUID v4 string.
- * @param {string} event.event_time - ISO-8601 UTC timestamp.
- * @param {string} event.event_type - Event type (e.g. AUTHENTICATION, SYSTEM).
- * @param {string} event.message - Human-readable event message.
- * @param {object|null} [event.metadata] - Arbitrary key-value metadata. null/absent → {}.
- * @param {string} event.previous_hash - Previous event's hash, or GENESIS_HASH for first event.
- * @param {number|string} event.sequence_number - Monotonically increasing integer (coerced).
- * @param {string} event.severity - Severity level (DEBUG|INFO|WARNING|ERROR|CRITICAL).
- * @param {string} event.source_id - Identifier of the event source.
- * @returns {string} Lowercase SHA-256 hex digest of the canonical JSON payload (64 chars).
- * @throws {TypeError} If any required field is missing or event_time is invalid.
- * @throws {RangeError} If sequence_number cannot be converted to a finite integer.
+ * @param {object} event - Raw or normalized event object.
+ * @returns {object} Canonical LOGN-HASH-v1 payload object.
+ * @throws {TypeError} If any required field is missing or invalid.
+ * @throws {RangeError} If sequence_number is negative or non-finite.
  */
-export function hashLogEvent(event) {
-  // ── Step 1: Validate required fields ────────────────────────────────────────
-  const missing = LOGN_HASH_V1_FIELDS.filter(
-    (field) => event[field] === undefined && field !== 'metadata'
-  );
-  // metadata is allowed to be null or absent; all others must be present
-  const strictMissing = LOGN_HASH_V1_FIELDS.filter((field) => {
-    if (field === 'metadata') return false; // metadata: null/absent is allowed
-    return event[field] === undefined || event[field] === null;
-  });
+export function normalizeEventPayload(event) {
+  if (!event || typeof event !== 'object') {
+    throw new TypeError('hashLogEvent: event must be a non-null object');
+  }
 
-  if (strictMissing.length > 0) {
+  // Extract fields supporting both canonical snake_case and legacy camelCase
+  const eventId = event.event_id ?? event.eventId;
+  const eventTime = event.event_time ?? event.eventTime ?? event.timestamp;
+  const eventType = event.event_type ?? event.eventType;
+  const message = event.message;
+  const metadata = event.metadata;
+  const previousHash = event.previous_hash ?? event.previousHash;
+  const sequenceNumber = event.sequence_number ?? event.sequenceNumber;
+  const severity = event.severity;
+  const sourceId = event.source_id ?? event.sourceId;
+
+  // Validation
+  const missing = [];
+  if (eventId === undefined || eventId === null) missing.push('event_id');
+  if (eventTime === undefined || eventTime === null) missing.push('event_time');
+  if (eventType === undefined || eventType === null) missing.push('event_type');
+  if (message === undefined || message === null) missing.push('message');
+  if (previousHash === undefined || previousHash === null) missing.push('previous_hash');
+  if (sequenceNumber === undefined || sequenceNumber === null) missing.push('sequence_number');
+  if (severity === undefined || severity === null) missing.push('severity');
+  if (sourceId === undefined || sourceId === null) missing.push('source_id');
+
+  if (missing.length > 0) {
     throw new TypeError(
-      `hashLogEvent: missing required LOGN-HASH-v1 fields: ${strictMissing.join(', ')}`
+      `hashLogEvent: missing required LOGN-HASH-v1 field(s): ${missing.join(', ')}`
     );
   }
 
-  // ── Step 2: Normalize event_time ────────────────────────────────────────────
-  const normalizedTime = normalizeTimestamp(String(event.event_time));
-
-  // ── Step 3: Normalize sequence_number to integer ────────────────────────────
-  const rawSeq = Number(event.sequence_number);
+  // Sequence number normalization
+  const rawSeq = Number(sequenceNumber);
   if (!Number.isFinite(rawSeq)) {
     throw new RangeError(
       `hashLogEvent: sequence_number cannot be converted to a finite number`
     );
   }
   const seqInt = Math.trunc(rawSeq);
+  if (seqInt < 0) {
+    throw new RangeError(
+      `hashLogEvent: sequence_number must be a non-negative integer: ${seqInt}`
+    );
+  }
 
-  // ── Step 4: Normalize metadata (null/absent → {}) ───────────────────────────
-  const rawMetadata = event.metadata ?? {};
+  // Previous hash normalization & validation (must be 64 hex characters)
+  const prevHashStr = String(previousHash).trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(prevHashStr)) {
+    throw new TypeError(
+      `hashLogEvent: previous_hash must be a 64-character lowercase hexadecimal string, got "${previousHash}"`
+    );
+  }
+
+  // Metadata normalization (null/absent/non-object → {})
+  const rawMetadata = metadata ?? {};
   const normalizedMetadata =
-    rawMetadata === null
+    rawMetadata === null || typeof rawMetadata !== 'object' || Array.isArray(rawMetadata)
       ? {}
-      : sortKeysDeep(typeof rawMetadata === 'object' ? rawMetadata : {});
+      : sortKeysDeep(rawMetadata);
 
-  // ── Step 5: Build the LOGN-HASH-v1 payload ──────────────────────────────────
-  // Field order here does NOT matter — canonicalJson() sorts keys independently.
-  const payload = {
-    event_id:        String(event.event_id),
-    event_time:      normalizedTime,
-    event_type:      String(event.event_type),
-    message:         String(event.message),
+  return {
+    event_id:        String(eventId),
+    event_time:      normalizeTimestamp(eventTime),
+    event_type:      String(eventType),
+    message:         String(message),
     metadata:        normalizedMetadata,
-    previous_hash:   String(event.previous_hash),
+    previous_hash:   prevHashStr,
     sequence_number: seqInt,
-    severity:        String(event.severity),
-    source_id:       String(event.source_id),
+    severity:        String(severity),
+    source_id:       String(sourceId),
   };
+}
 
-  // ── Step 6: Canonical JSON → SHA-256 ────────────────────────────────────────
+/**
+ * Compute the canonical LOGN-HASH-v1 hash for a single log event.
+ *
+ * @param {object} event - The log event object (snake_case or legacy camelCase).
+ * @returns {string} Lowercase SHA-256 hex digest of the canonical JSON payload (64 chars).
+ */
+export function hashLogEvent(event) {
+  const payload = normalizeEventPayload(event);
   const canonicalString = canonicalJson(payload);
   return sha256hex(canonicalString);
 }
 
-export default { GENESIS_HASH, LOGN_HASH_V1_FIELDS, sha256hex, hashLogEvent };
+/**
+ * Explicitly versioned alias for LOGN-HASH-v1 event hashing.
+ */
+export const hashLogEventV1 = hashLogEvent;
+
+export default {
+  GENESIS_HASH,
+  HASH_SCHEMA_VERSION,
+  LOGN_HASH_V1_FIELDS,
+  sha256hex,
+  normalizeTimestamp,
+  normalizeEventPayload,
+  hashLogEvent,
+  hashLogEventV1,
+};
