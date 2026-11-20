@@ -1,23 +1,24 @@
 import Log from '../models/Log.js';
 import Source from '../models/Source.js';
+import Checkpoint from '../models/Checkpoint.js';
 import { generateLogHash } from '../utils/generateHash.js';
+import { verifyCheckpointSignature } from './checkpointService.js';
 
 const GENESIS_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
 
 /**
- * Verify cryptographic hash chain integrity for a specific log source.
- * Detects:
- *  - Modified event contents or metadata
- *  - Deleted records (sequence number gaps)
- *  - Out-of-order / reordered records
- *  - Broken hash chains (previousHash mismatch)
+ * Verify cryptographic hash chain integrity and signed checkpoints for a specific source.
  */
 export const verifySourceHashChain = async (sourceId) => {
-  const logs = await Log.find({ sourceId }).sort({ sequenceNumber: 1 }).lean();
+  const [logs, checkpoints] = await Promise.all([
+    Log.find({ sourceId }).sort({ sequenceNumber: 1 }).lean(),
+    Checkpoint.find({ sourceId }).sort({ lastSequenceNumber: 1 }).lean(),
+  ]);
 
   const report = {
     sourceId,
     totalLogs: logs.length,
+    totalCheckpoints: checkpoints.length,
     isValid: true,
     firstSequence: logs.length > 0 ? logs[0].sequenceNumber : 0,
     lastSequence: logs.length > 0 ? logs[logs.length - 1].sequenceNumber : 0,
@@ -27,15 +28,18 @@ export const verifySourceHashChain = async (sourceId) => {
     verifiedAt: new Date().toISOString(),
   };
 
-  if (logs.length === 0) {
+  if (logs.length === 0 && checkpoints.length === 0) {
     return report;
   }
 
+  // Map logs by sequence number for fast cross-verification
+  const logsBySequence = new Map();
   let expectedPreviousHash = GENESIS_HASH;
   let expectedSequence = 1;
 
   for (let i = 0; i < logs.length; i++) {
     const current = logs[i];
+    logsBySequence.set(current.sequenceNumber, current);
     let recordValid = true;
 
     // 1. Detect missing sequence numbers or deletions
@@ -49,7 +53,6 @@ export const verifySourceHashChain = async (sourceId) => {
         eventId: current.eventId,
         message: `Sequence gap detected: expected ${expectedSequence}, but found ${current.sequenceNumber}. Possible record deletion.`,
       });
-      // Resynchronize expected sequence to current to continue inspecting remaining chain
       expectedSequence = current.sequenceNumber;
     }
 
@@ -68,7 +71,7 @@ export const verifySourceHashChain = async (sourceId) => {
       });
     }
 
-    // 3. Recalculate deterministic SHA-256 hash to detect content or timestamp tampering
+    // 3. Recalculate deterministic SHA-256 hash to detect content tampering
     const recalculatedHash = generateLogHash({
       eventId: current.eventId,
       sourceId: current.sourceId,
@@ -93,7 +96,7 @@ export const verifySourceHashChain = async (sourceId) => {
       });
     }
 
-    // 4. Detect sequence or timestamp order inversion (reordering)
+    // 4. Detect reordered records
     if (i > 0) {
       const prev = logs[i - 1];
       if (current.sequenceNumber <= prev.sequenceNumber) {
@@ -113,9 +116,49 @@ export const verifySourceHashChain = async (sourceId) => {
       report.tamperedCount++;
     }
 
-    // Update expected pointer for next iteration
     expectedPreviousHash = current.currentHash;
     expectedSequence = current.sequenceNumber + 1;
+  }
+
+  // 5. Cross-verify independently signed checkpoints against the chain
+  for (const chk of checkpoints) {
+    // 5a. Verify Ed25519 digital signature
+    const signatureCheck = verifyCheckpointSignature(chk);
+    if (!signatureCheck.isValid) {
+      report.isValid = false;
+      report.anomalies.push({
+        type: 'INVALID_CHECKPOINT_SIGNATURE',
+        severity: 'critical',
+        checkpointId: chk.checkpointId,
+        lastSequenceNumber: chk.lastSequenceNumber,
+        message: `Invalid Ed25519 signature on checkpoint ${chk.checkpointId}. Signature was forged or data was altered.`,
+      });
+      continue;
+    }
+
+    // 5b. Verify checkpoint head matches the actual chain at that sequence number
+    const chainedLogAtCheckpoint = logsBySequence.get(chk.lastSequenceNumber);
+    if (!chainedLogAtCheckpoint) {
+      report.isValid = false;
+      report.anomalies.push({
+        type: 'CHECKPOINT_MISSING_LOG',
+        severity: 'critical',
+        checkpointId: chk.checkpointId,
+        lastSequenceNumber: chk.lastSequenceNumber,
+        message: `Checkpoint ${chk.checkpointId} references sequence ${chk.lastSequenceNumber}, which is missing from the database.`,
+      });
+    } else if (chainedLogAtCheckpoint.currentHash !== chk.chainHeadHash) {
+      report.isValid = false;
+      report.anomalies.push({
+        type: 'CHECKPOINT_CHAIN_MISMATCH',
+        severity: 'critical',
+        checkpointId: chk.checkpointId,
+        lastSequenceNumber: chk.lastSequenceNumber,
+        checkpointHash: chk.chainHeadHash,
+        chainLogHash: chainedLogAtCheckpoint.currentHash,
+        message: `Tamper alert: Checkpoint ${chk.checkpointId} hash does not match the log chain at sequence ${chk.lastSequenceNumber}. Hash chain may have been rewritten by an attacker with root access.`,
+      });
+    }
   }
 
   return report;
