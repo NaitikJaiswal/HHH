@@ -36,6 +36,7 @@ import { verify as cryptoVerify } from 'node:crypto';
 import { buildMerkleTree, getMerkleRoot, generateMerkleProof, verifyMerkleProof } from '../merkle/merkleTree.js';
 import { canonicalJson } from '../crypto/canonicalJson.js';
 import { generateUuidV4, publicKeyFromHex } from '../keys/keyManager.js';
+import { BlockchainError, BlockchainErrorCode } from '../blockchain/errors.js';
 
 // ── Schema constants ──────────────────────────────────────────────────────────
 
@@ -346,7 +347,7 @@ export function verifyCheckpoint(checkpoint, keyManager) {
       return _result(VerificationStatus.UNKNOWN_SIGNING_KEY, failures, checks);
     }
 
-    // Verify key match
+    // Verify key match against trusted registry
     if (resolvedPublicKey !== checkpoint.signer_public_key) {
       failures.push(
         `Registry public key for "${checkpoint.signing_key_id}" does not match embedded signer_public_key`
@@ -356,9 +357,10 @@ export function verifyCheckpoint(checkpoint, keyManager) {
     }
     checks.signing_key = true;
   } else {
-    // No KeyManager provided: verify with embedded public key directly
-    resolvedPublicKey = checkpoint.signer_public_key;
-    checks.signing_key = true;
+    // Trusted provenance enforcement: Never trust an arbitrary public key supplied by an untrusted checkpoint
+    failures.push('KeyManager is required to verify signing key provenance against the trusted key registry');
+    checks.signing_key = false;
+    return _result(VerificationStatus.UNKNOWN_SIGNING_KEY, failures, checks);
   }
 
   // ── Check 7: Signature verification ────────────────────────────────────────
@@ -453,6 +455,107 @@ function _result(status, failures, checks) {
   };
 }
 
+/**
+ * Anchors a completed, signed checkpoint to the blockchain.
+ *
+ * Implements the Step 3 workflow:
+ *  1. Receives completed signed checkpoint.
+ *  2. Validates structure and verifies its Ed25519 signature.
+ *  3. Extracts existing checkpoint ID and Merkle root.
+ *  4. Extracts sequence range, event count, and timestamp.
+ *  5. Submits commitment to SecureLogAnchor via blockchainService.
+ *  6. Waits for transaction confirmation.
+ *  7. Records transaction metadata into checkpoint.blockchain.
+ *  8. Retrieves commitment from the contract.
+ *  9. Compares retrieved root and metadata with the original checkpoint.
+ *
+ * @param {SignedCheckpoint} checkpoint - Valid signed checkpoint document.
+ * @param {import('../blockchain/blockchainService.js').BlockchainService} blockchainService
+ * @param {import('../keys/keyManager.js').KeyManager} [keyManager]
+ * @returns {Promise<{ checkpoint: SignedCheckpoint, anchorResult: object, verified: boolean }>}
+ */
+export async function anchorSignedCheckpoint(checkpoint, blockchainService, keyManager) {
+  if (!checkpoint || typeof checkpoint !== 'object') {
+    throw new BlockchainError(
+      BlockchainErrorCode.INVALID_CHECKPOINT,
+      'checkpoint must be a non-null object'
+    );
+  }
+
+  if (!blockchainService) {
+    throw new TypeError('blockchainService is required');
+  }
+
+  // 1 & 2: Verify checkpoint structure and signature
+  const verifyResult = verifyCheckpoint(checkpoint, keyManager);
+  if (!verifyResult.valid) {
+    const isSigError = verifyResult.status === VerificationStatus.INVALID_SIGNATURE;
+    const isKeyError = verifyResult.status === VerificationStatus.UNKNOWN_SIGNING_KEY;
+    const errCode = isSigError || isKeyError
+      ? BlockchainErrorCode.INVALID_SIGNATURE
+      : BlockchainErrorCode.INVALID_CHECKPOINT;
+
+    throw new BlockchainError(
+      errCode,
+      `Cannot anchor invalid checkpoint: ${verifyResult.failures.join('; ')}`,
+      { details: verifyResult }
+    );
+  }
+
+  // 3, 4, 5 & 6: Extract parameters and submit commitment
+  const anchorParams = {
+    checkpointId: checkpoint.checkpoint_id,
+    merkleRoot: checkpoint.merkle_root,
+    startSequence: checkpoint.start_sequence,
+    endSequence: checkpoint.end_sequence,
+    eventCount: checkpoint.event_count,
+    timestamp: checkpoint.timestamp,
+  };
+
+  const anchorResult = await blockchainService.anchorCheckpoint(anchorParams);
+
+  // 7: Record transaction metadata
+  checkpoint.blockchain = {
+    contractAddress: anchorResult.contractAddress,
+    txHash:          anchorResult.txHash,
+    blockNumber:     anchorResult.blockNumber,
+    chainId:         anchorResult.chainId,
+    anchoredAt:      anchorResult.anchoredAt,
+    gasUsed:         anchorResult.gasUsed,
+  };
+
+  // 8 & 9: Retrieve commitment and compare with original checkpoint
+  const onChainCommitment = await blockchainService.getCommitment(checkpoint.checkpoint_id);
+
+  // Compare Merkle root (normalize 0x prefix and lowercase)
+  const storedRoot = checkpoint.merkle_root.toLowerCase().replace(/^0x/, '');
+  const onChainRoot = onChainCommitment.merkleRoot.toLowerCase().replace(/^0x/, '');
+
+  if (storedRoot !== onChainRoot) {
+    throw new BlockchainError(
+      BlockchainErrorCode.MERKLE_MISMATCH,
+      `On-chain root "${onChainRoot}" does not match checkpoint root "${storedRoot}"`
+    );
+  }
+
+  if (
+    onChainCommitment.startSequence !== checkpoint.start_sequence ||
+    onChainCommitment.endSequence !== checkpoint.end_sequence ||
+    onChainCommitment.eventCount !== checkpoint.event_count
+  ) {
+    throw new BlockchainError(
+      BlockchainErrorCode.INVALID_CHECKPOINT,
+      `On-chain commitment sequence bounds [${onChainCommitment.startSequence}, ${onChainCommitment.endSequence}] or count (${onChainCommitment.eventCount}) do not match checkpoint [${checkpoint.start_sequence}, ${checkpoint.end_sequence}] count (${checkpoint.event_count})`
+    );
+  }
+
+  return {
+    checkpoint,
+    anchorResult,
+    verified: true,
+  };
+}
+
 export default {
   CHECKPOINT_SCHEMA_VERSION,
   SIGNATURE_ALGORITHM,
@@ -462,4 +565,5 @@ export default {
   createCheckpoint,
   verifyCheckpoint,
   verifyCheckpointProof,
+  anchorSignedCheckpoint,
 };

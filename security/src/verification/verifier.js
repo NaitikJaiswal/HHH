@@ -193,9 +193,104 @@ export function verifyEventsAgainstCheckpoint(checkpoint, events, keyManager) {
   };
 }
 
+/**
+ * End-to-end verification of a checkpoint including off-chain cryptography and on-chain commitment.
+ * Implements docs/technical-integration-contract.md §9.2.
+ *
+ * @param {object} checkpoint - Checkpoint document (with optional blockchain metadata).
+ * @param {import('../blockchain/blockchainService.js').BlockchainService} blockchainService
+ * @param {import('../keys/keyManager.js').KeyManager} [keyManager]
+ * @returns {Promise<object>} VerificationReport conforming to §9.5.
+ */
+export async function verifyCheckpointWithBlockchain(checkpoint, blockchainService, keyManager) {
+  const report = {
+    checkpointId:       checkpoint?.checkpoint_id || null,
+    sourceId:           checkpoint?.source_id || null,
+    sequenceRange:      { start: checkpoint?.start_sequence, end: checkpoint?.end_sequence },
+    eventCount:         { expected: checkpoint?.event_count, found: checkpoint?.merkle_leaf_hashes?.length || 0 },
+    merkleRootMatch:    false,
+    recomputedRoot:     null,
+    storedRoot:         checkpoint?.merkle_root || null,
+    signatureValid:     false,
+    signingKeyId:       checkpoint?.signing_key_id || null,
+    keyRegistered:      false,
+    keyActive:          true,
+    keyMismatch:        false,
+    onChainStatus:      'NOT_ANCHORED',
+    onChainMatch:       false,
+    onChainRoot:        null,
+    onChainBlockNumber: null,
+    onChainTxHash:      checkpoint?.blockchain?.txHash || null,
+    overallValid:       false,
+    verifiedAt:         new Date().toISOString(),
+    errors:             [],
+    warnings:           [],
+  };
+
+  if (!checkpoint || typeof checkpoint !== 'object') {
+    report.errors.push('Checkpoint must be a non-null object');
+    return report;
+  }
+
+  // 1. Off-chain verification
+  const offChainResult = verifyCheckpoint(checkpoint, keyManager);
+  report.signatureValid = offChainResult.checks.signature;
+  report.merkleRootMatch = offChainResult.checks.merkle_root;
+  report.keyRegistered = offChainResult.checks.signing_key;
+
+  try {
+    const tree = buildMerkleTree(checkpoint.merkle_leaf_hashes);
+    report.recomputedRoot = getMerkleRoot(tree);
+  } catch {
+    report.recomputedRoot = null;
+  }
+
+  if (!offChainResult.valid) {
+    report.errors.push(...offChainResult.failures);
+  }
+
+  // 2. On-chain verification
+  if (!blockchainService) {
+    report.warnings.push('blockchainService not provided; on-chain verification skipped');
+  } else {
+    try {
+      const onChainResult = await blockchainService.verifyOnChain(
+        checkpoint.checkpoint_id,
+        checkpoint.merkle_root
+      );
+      report.onChainMatch = onChainResult.match;
+      report.onChainRoot = onChainResult.onChainRoot;
+      report.onChainBlockNumber = onChainResult.blockNumber;
+      report.onChainStatus = onChainResult.match ? 'MATCH' : (onChainResult.onChainRoot ? 'MISMATCH' : 'NOT_ANCHORED');
+      if (!onChainResult.match) {
+        if (!onChainResult.onChainRoot) {
+          report.errors.push(`Checkpoint "${checkpoint.checkpoint_id}" not found on blockchain`);
+        } else {
+          report.errors.push(`On-chain root "${onChainResult.onChainRoot}" does not match stored root "${checkpoint.merkle_root}"`);
+        }
+      }
+    } catch (err) {
+      report.onChainStatus = 'ERROR';
+      report.errors.push(`On-chain verification error: ${err.message}`);
+    }
+  }
+
+  // 3. Overall validity
+  report.overallValid =
+    report.merkleRootMatch &&
+    report.signatureValid &&
+    report.onChainMatch &&
+    Boolean(report.keyRegistered) &&
+    !report.keyMismatch &&
+    report.errors.length === 0;
+
+  return report;
+}
+
 export default {
   VerificationStatus,
   verifySignedCheckpoint,
   verifyInclusionProof,
   verifyEventsAgainstCheckpoint,
+  verifyCheckpointWithBlockchain,
 };
