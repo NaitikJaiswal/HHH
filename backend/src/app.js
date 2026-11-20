@@ -10,6 +10,8 @@ import authRoutes from './routes/authRoutes.js';
 import logRoutes from './routes/logRoutes.js';
 import integrityRoutes from './routes/integrityRoutes.js';
 import incidentRoutes from './routes/incidentRoutes.js';
+import dashboardRoutes from './routes/dashboardRoutes.js';
+import sourceRoutes from './routes/sourceRoutes.js';
 
 const app = express();
 
@@ -75,6 +77,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/logs', logRoutes);
 app.use('/api/integrity', integrityRoutes);
 app.use('/api/incidents', incidentRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/sources', sourceRoutes);
 
 // 7. 404 & Centralized Error Middleware
 app.use(notFound);
