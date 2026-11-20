@@ -4,6 +4,7 @@ import {
   getStatus,
   getCheckpointsList,
   createSourceCheckpoint,
+  getAlerts,
 } from '../controllers/integrityController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
@@ -16,5 +17,6 @@ router.post('/verify', verifyIntegrity);
 router.get('/status', getStatus);
 router.get('/checkpoints', getCheckpointsList);
 router.post('/checkpoints', createSourceCheckpoint);
+router.get('/alerts', getAlerts);
 
 export default router;

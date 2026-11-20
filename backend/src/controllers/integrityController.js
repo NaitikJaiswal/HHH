@@ -1,5 +1,23 @@
 import integrityService from '../services/integrityService.js';
 import checkpointService from '../services/checkpointService.js';
+import incidentService from '../services/incidentService.js';
+
+/**
+ * Retrieve active security alerts
+ * GET /api/integrity/alerts
+ */
+export const getAlerts = async (req, res, next) => {
+  try {
+    const activeAlerts = await incidentService.getIncidents({ status: 'OPEN', limit: 50 });
+    res.status(200).json({
+      success: true,
+      message: 'Active security alerts retrieved',
+      data: activeAlerts,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
 /**
  * Trigger an on-demand cryptographic verification audit
@@ -86,4 +104,5 @@ export default {
   getStatus,
   getCheckpointsList,
   createSourceCheckpoint,
+  getAlerts,
 };

@@ -1,8 +1,11 @@
 import Log from '../models/Log.js';
 import Source from '../models/Source.js';
 import Checkpoint from '../models/Checkpoint.js';
+import Incident from '../models/Incident.js';
+import { isDBConnected } from '../config/db.js';
 import { generateLogHash } from '../utils/generateHash.js';
 import { verifyCheckpointSignature } from './checkpointService.js';
+import { createIncident } from './incidentService.js';
 
 const GENESIS_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
 
@@ -158,6 +161,32 @@ export const verifySourceHashChain = async (sourceId) => {
         chainLogHash: chainedLogAtCheckpoint.currentHash,
         message: `Tamper alert: Checkpoint ${chk.checkpointId} hash does not match the log chain at sequence ${chk.lastSequenceNumber}. Hash chain may have been rewritten by an attacker with root access.`,
       });
+    }
+  }
+
+  // 6. Automatically generate Incident records and update Log verificationStatus
+  const canPersistIncidents = isDBConnected() || Boolean(Incident.findOne?._isMockFunction || Incident.findOne?.mock);
+  if (canPersistIncidents && report.anomalies.length > 0) {
+    for (const anomaly of report.anomalies) {
+      try {
+        await createIncident({
+          type: anomaly.type,
+          severity: anomaly.severity || 'high',
+          sourceId,
+          description: anomaly.message,
+          affectedEventIds: anomaly.eventId ? [anomaly.eventId] : [],
+          evidenceReference: anomaly.checkpointId || null,
+        });
+
+        if (anomaly.eventId) {
+          await Log.updateOne(
+            { eventId: anomaly.eventId },
+            { $set: { verificationStatus: 'TAMPERED' } }
+          );
+        }
+      } catch (err) {
+        console.error('[Integrity Engine] Failed to record incident:', err.message);
+      }
     }
   }
 

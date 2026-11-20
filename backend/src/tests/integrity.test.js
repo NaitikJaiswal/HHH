@@ -11,6 +11,8 @@ import { generateToken } from '../services/authService.js';
 import Log from '../models/Log.js';
 import Source from '../models/Source.js';
 import Checkpoint from '../models/Checkpoint.js';
+import Incident from '../models/Incident.js';
+import incidentService from '../services/incidentService.js';
 
 describe('Milestone 6: Ed25519 Signatures, Signed Checkpoints & Integrity Auditing', () => {
   const testAuthToken = generateToken({
@@ -126,6 +128,11 @@ describe('Milestone 6: Ed25519 Signatures, Signed Checkpoints & Integrity Auditi
           lean: vi.fn().mockResolvedValue(JSON.parse(JSON.stringify(mockCheckpoints))),
         }),
       }));
+
+      vi.spyOn(Incident, 'findOne').mockResolvedValue(null);
+      vi.spyOn(Incident, 'create').mockResolvedValue({ incidentId: 'inc-mock' });
+      vi.spyOn(incidentService, 'createIncident').mockResolvedValue({ incidentId: 'inc-mock' });
+      vi.spyOn(Log, 'updateOne').mockResolvedValue({ modifiedCount: 1 });
     });
 
     it('3. Successfully verifies valid log chain and corresponding signed checkpoint', async () => {
