@@ -387,6 +387,7 @@ export default function ForensicNodeScene({
 
     // 11. ANIMATION & RENDER LOOP
     let clock = new THREE.Clock();
+    let animationFrameId;
 
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
