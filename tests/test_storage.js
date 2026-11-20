@@ -172,4 +172,113 @@ describe('LOGN Storage & Backup Services', () => {
     // Protected bundle intact
     assert.equal(fs.existsSync(rProtected.path), true);
   });
+
+  test('StorageService: enforces structured errors on missing files and invalid bundles', async () => {
+    const storage = new StorageService(path.join(tempBaseDir, 'vault'));
+    const { StorageErrorCode } = StorageService;
+
+    // Non-existent file
+    await assert.rejects(
+      async () => storage.retrieveEvidenceByPath(path.join(tempBaseDir, 'vault', 'nonexistent.json')),
+      (err) => {
+        assert.equal(err.code, StorageErrorCode.FILE_NOT_FOUND);
+        return true;
+      }
+    );
+
+    // Invalid bundle input
+    await assert.rejects(
+      async () => storage.storeEvidence('invalid-non-object'),
+      (err) => {
+        assert.equal(err.code, StorageErrorCode.INVALID_BUNDLE);
+        return true;
+      }
+    );
+  });
+
+  test('StorageService: detects missing required SHA-256 sidecar', async () => {
+    const storage = new StorageService(path.join(tempBaseDir, 'vault'));
+    const record = await storage.storeEvidence({
+      bundle_id: 'bundle-no-sidecar',
+      created_at: '2026-11-20T10:00:00Z',
+      manifest: { source_id: 'srv-omega' },
+      events: [{ event_id: 'ev-1' }],
+    });
+
+    // Delete the sidecar file
+    const sidecarPath = `${record.path}.sha256`;
+    await fsp.unlink(sidecarPath);
+
+    // Default retrieval still parses file, but with requireSidecar: true it throws
+    await assert.rejects(
+      async () => storage.retrieveEvidenceByPath(record.path, { requireSidecar: true }),
+      (err) => {
+        assert.equal(err.code, StorageService.StorageErrorCode.MISSING_SIDECAR);
+        return true;
+      }
+    );
+  });
+
+  test('StorageService: cleans orphaned .tmp files from interrupted writes', async () => {
+    const storage = new StorageService(path.join(tempBaseDir, 'vault'));
+    await storage.init();
+
+    const orphanedDir = path.join(tempBaseDir, 'vault', 'source_a', '2026-11-20');
+    await fsp.mkdir(orphanedDir, { recursive: true });
+
+    const orphanedFile = path.join(orphanedDir, 'bundle-x.12345-abcd.tmp');
+    await fsp.writeFile(orphanedFile, 'INCOMPLETE_ORPHANED_DATA', 'utf-8');
+
+    // Backdate the temp file so it qualifies as expired (> 100ms for test)
+    const twoSecondsAgo = new Date(Date.now() - 2000);
+    await fsp.utimes(orphanedFile, twoSecondsAgo, twoSecondsAgo);
+
+    const cleaned = await storage.cleanOrphanedTempFiles(500); // older than 500ms
+    assert.equal(cleaned.length, 1);
+    assert.equal(cleaned[0], orphanedFile);
+    assert.equal(fs.existsSync(orphanedFile), false);
+  });
+
+  test('StorageService: enforces restricted 0600 file permissions on POSIX systems', async () => {
+    if (process.platform === 'win32') return; // Skip POSIX permission check on Windows
+
+    const storage = new StorageService(path.join(tempBaseDir, 'vault'));
+    const record = await storage.storeEvidence({
+      bundle_id: 'perm-test-bundle',
+      created_at: '2026-11-20T10:00:00Z',
+      manifest: { source_id: 'srv-omega' },
+      events: [],
+    });
+
+    const fileStat = await fsp.stat(record.path);
+    const sidecarStat = await fsp.stat(`${record.path}.sha256`);
+
+    // Mask with 0o777 to check permission bits: 0o600 means read/write owner only
+    const fileMode = fileStat.mode & 0o777;
+    const sidecarMode = sidecarStat.mode & 0o777;
+
+    assert.equal(fileMode, 0o600, 'Evidence file must have 0600 permissions');
+    assert.equal(sidecarMode, 0o600, 'Sidecar file must have 0600 permissions');
+  });
+
+  test('StorageService: supports concurrent writes without temporary file collisions', async () => {
+    const storage = new StorageService(path.join(tempBaseDir, 'vault'));
+    const writePromises = Array.from({ length: 10 }, (_, i) =>
+      storage.storeEvidence({
+        bundle_id: `concurrent-bundle-${i}`,
+        created_at: '2026-11-20T10:00:00Z',
+        manifest: { source_id: 'srv-concurrent' },
+        events: [{ index: i }],
+      })
+    );
+
+    const results = await Promise.all(writePromises);
+    assert.equal(results.length, 10);
+
+    for (let i = 0; i < 10; i++) {
+      const retrieved = await storage.findBundleById(`concurrent-bundle-${i}`, { requireSidecar: true });
+      assert.ok(retrieved !== null);
+      assert.equal(retrieved.events[0].index, i);
+    }
+  });
 });
