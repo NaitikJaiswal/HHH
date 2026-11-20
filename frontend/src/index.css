@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-obsidian-950 text-platinum-300 font-sans antialiased overflow-x-hidden selection:bg-platinum-400/20 selection:text-white;
+  }
+}
+
+/* Smoked Glass Surfaces */
+.glass-panel {
+  background: rgba(14, 19, 31, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.glass-panel-subtle {
+  background: rgba(10, 14, 23, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.glass-dropdown {
+  background: rgba(8, 12, 19, 0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8);
+}
+
+/* Custom Minimalist Forensics Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: #06090F;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1C2232;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #343D56;
+}
+
+/* Subtle Shimmer Animations */
+@keyframes chrome-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.chrome-text {
+  background: linear-gradient(135deg, #FFFFFF 0%, #CBD5E1 50%, #94A3B8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
