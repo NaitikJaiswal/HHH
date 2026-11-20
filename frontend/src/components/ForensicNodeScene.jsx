@@ -52,8 +52,8 @@ export default function ForensicNodeScene({
     if (is2DMode || !canvasRef.current || !containerRef.current) return;
 
     const container = containerRef.current;
-    const width = container.clientWidth;
-    const height = container.clientHeight;
+    const width = container.clientWidth || 800;
+    const height = container.clientHeight || 660;
 
     // 1. Scene, Camera, and Fog setup
     const scene = new THREE.Scene();
@@ -63,15 +63,22 @@ export default function ForensicNodeScene({
     camera.position.set(0, 22, 92);
     cameraRef.current = camera;
 
-    // 2. High-Fidelity WebGL Renderer
-    const renderer = new THREE.WebGLRenderer({
-      canvas: canvasRef.current,
-      alpha: true,
-      antialias: true,
-      powerPreference: 'high-performance',
-    });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // 2. High-Fidelity WebGL Renderer with graceful fallback
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        canvas: canvasRef.current,
+        alpha: true,
+        antialias: true,
+        powerPreference: 'high-performance',
+      });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    } catch (err) {
+      console.warn('WebGL unavailable, falling back to 2D:', err);
+      setIs2DMode(true);
+      return;
+    }
 
     // 3. Smooth Orbit Controls
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -214,6 +221,7 @@ export default function ForensicNodeScene({
     scene.add(nodeGroup);
 
     nodes.forEach((node) => {
+      if (!node || typeof node.x !== 'number') return;
       const theme = getCategoryTheme(node.category, node.status);
       const isSelected = selectedNode?.id === node.id;
       const subGroup = new THREE.Group();
