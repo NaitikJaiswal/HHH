@@ -8,7 +8,11 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "test": "node --test tests/canonicalJson.test.js tests/hashing.test.js tests/hashChain.test.js tests/merkleTree.test.js tests/keyManager.test.js tests/checkpointService.test.js tests/verifier.test.js"
+    "test": "node --test tests/canonicalJson.test.js tests/hashing.test.js tests/hashChain.test.js tests/merkleTree.test.js tests/keyManager.test.js tests/checkpointService.test.js tests/verifier.test.js",
+    "test:contracts": "HARDHAT_DISABLE_TELEMETRY=true HARDHAT_ENABLE_TELEMETRY=false npx hardhat test --config blockchain/hardhat.config.js",
+    "test:all": "npm test && npm run test:contracts",
+    "compile": "HARDHAT_DISABLE_TELEMETRY=true HARDHAT_ENABLE_TELEMETRY=false npx hardhat compile --config blockchain/hardhat.config.js",
+    "deploy:local": "HARDHAT_DISABLE_TELEMETRY=true HARDHAT_ENABLE_TELEMETRY=false npx hardhat run blockchain/scripts/deploy.js --config blockchain/hardhat.config.js"
   },
   "keywords": [
     "security",
@@ -18,5 +22,13 @@
     "forensics",
     "tamper-evident"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^3.0.0",
+    "@nomicfoundation/hardhat-ethers": "^4.2.2",
+    "@nomicfoundation/hardhat-mocha": "^4.0.1",
+    "chai": "^4.5.0",
+    "ethers": "^6.17.0",
+    "hardhat": "^3.22.0"
+  }
 }

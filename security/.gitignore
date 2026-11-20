@@ -6,3 +6,7 @@ signing_key.*
 coverage/
 *.key
 .DS_Store
+cache/
+artifacts/
+blockchain/cache/
+blockchain/artifacts/
