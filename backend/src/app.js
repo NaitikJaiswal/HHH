@@ -5,6 +5,9 @@ import morgan from 'morgan';
 import { isDBConnected } from './config/db.js';
 import { notFound, errorHandler } from './middleware/errorMiddleware.js';
 
+// Route imports
+import authRoutes from './routes/authRoutes.js';
+
 const app = express();
 
 // 1. Security Headers with Helmet
@@ -64,13 +67,11 @@ app.get('/', (req, res) => {
   });
 });
 
-// 6. 404 & Centralized Error Middleware (Exported so routes can be mounted before them)
-export const mountErrorHandlers = (application) => {
-  application.use(notFound);
-  application.use(errorHandler);
-};
+// 6. Mount API Route Modules
+app.use('/api/auth', authRoutes);
 
-// Mount error handlers by default
-mountErrorHandlers(app);
+// 7. 404 & Centralized Error Middleware
+app.use(notFound);
+app.use(errorHandler);
 
 export default app;
