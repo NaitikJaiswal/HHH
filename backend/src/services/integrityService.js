@@ -15,7 +15,7 @@ const GENESIS_HASH = '0000000000000000000000000000000000000000000000000000000000
 export const verifySourceHashChain = async (sourceId) => {
   const [logs, checkpoints] = await Promise.all([
     Log.find({ sourceId }).sort({ sequenceNumber: 1 }).lean(),
-    Checkpoint.find({ sourceId }).sort({ lastSequenceNumber: 1 }).lean(),
+    Checkpoint.find({ sourceId }).sort({ lastSequenceNumber: 1, end_sequence: 1 }).lean(),
   ]);
 
   const report = {
@@ -143,15 +143,16 @@ export const verifySourceHashChain = async (sourceId) => {
     }
 
     // 5b. Verify checkpoint head matches the actual chain at that sequence number
-    const chainedLogAtCheckpoint = logsBySequence.get(chk.lastSequenceNumber);
+    const targetSequence = chk.end_sequence ?? chk.lastSequenceNumber;
+    const chainedLogAtCheckpoint = logsBySequence.get(targetSequence);
     if (!chainedLogAtCheckpoint) {
       report.isValid = false;
       report.anomalies.push({
         type: 'CHECKPOINT_MISSING_LOG',
         severity: 'critical',
         checkpointId: chk.checkpointId,
-        lastSequenceNumber: chk.lastSequenceNumber,
-        message: `Checkpoint ${chk.checkpointId} references sequence ${chk.lastSequenceNumber}, which is missing from the database.`,
+        lastSequenceNumber: targetSequence,
+        message: `Checkpoint ${chk.checkpointId} references sequence ${targetSequence}, which is missing from the database.`,
       });
     } else if (chainedLogAtCheckpoint.currentHash !== chk.chainHeadHash) {
       report.isValid = false;
@@ -159,10 +160,10 @@ export const verifySourceHashChain = async (sourceId) => {
         type: 'CHECKPOINT_CHAIN_MISMATCH',
         severity: 'critical',
         checkpointId: chk.checkpointId,
-        lastSequenceNumber: chk.lastSequenceNumber,
+        lastSequenceNumber: targetSequence,
         checkpointHash: chk.chainHeadHash,
         chainLogHash: chainedLogAtCheckpoint.currentHash,
-        message: `Tamper alert: Checkpoint ${chk.checkpointId} hash does not match the log chain at sequence ${chk.lastSequenceNumber}. Hash chain may have been rewritten by an attacker with root access.`,
+        message: `Tamper alert: Checkpoint ${chk.checkpointId} hash does not match the log chain at sequence ${targetSequence}. Hash chain may have been rewritten by an attacker with root access.`,
       });
     }
   }
