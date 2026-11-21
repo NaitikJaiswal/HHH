@@ -203,7 +203,7 @@ export function verifyEventsAgainstCheckpoint(checkpoint, events, keyManagerOrMp
  * @param {import('../keys/keyManager.js').KeyManager} [keyManager]
  * @returns {Promise<object>} VerificationReport conforming to §9.5.
  */
-export async function verifyCheckpointWithBlockchain(checkpoint, blockchainService, keyManager) {
+export async function verifyCheckpointWithBlockchain(checkpoint, blockchainService, keyManagerOrMpk, options = {}) {
   const report = {
     checkpointId:       checkpoint?.checkpoint_id || null,
     sourceId:           checkpoint?.source_id || null,
@@ -213,7 +213,9 @@ export async function verifyCheckpointWithBlockchain(checkpoint, blockchainServi
     recomputedRoot:     null,
     storedRoot:         checkpoint?.merkle_root || null,
     signatureValid:     false,
-    signingKeyId:       checkpoint?.signing_key_id || null,
+    signingKeyId:       checkpoint?.mpk || checkpoint?.signing_key_id || null,
+    fssEpoch:           checkpoint?.fss_epoch ?? null,
+    mpk:                checkpoint?.mpk || null,
     keyRegistered:      false,
     keyActive:          true,
     keyMismatch:        false,
@@ -221,7 +223,7 @@ export async function verifyCheckpointWithBlockchain(checkpoint, blockchainServi
     onChainMatch:       false,
     onChainRoot:        null,
     onChainBlockNumber: null,
-    onChainTxHash:      checkpoint?.blockchain?.txHash || null,
+    onChainTxHash:      checkpoint?.blockchain?.txHash || checkpoint?.blockchain?.transaction_hash || null,
     overallValid:       false,
     verifiedAt:         new Date().toISOString(),
     errors:             [],
@@ -234,7 +236,7 @@ export async function verifyCheckpointWithBlockchain(checkpoint, blockchainServi
   }
 
   // 1. Off-chain verification
-  const offChainResult = verifyCheckpoint(checkpoint, keyManager);
+  const offChainResult = verifyCheckpoint(checkpoint, keyManagerOrMpk, options);
   report.signatureValid = offChainResult.checks.signature;
   report.merkleRootMatch = offChainResult.checks.merkle_root;
   report.keyRegistered = offChainResult.checks.signing_key;

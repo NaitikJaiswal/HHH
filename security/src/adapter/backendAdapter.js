@@ -58,11 +58,11 @@ export class BackendAdapter {
    * @throws {BlockchainError} Structured error on failure.
    */
   async anchorCheckpointForBackend(checkpoint, options = {}) {
-    const km = options.keyManager || this.keyManager;
+    const km = options.keyManager || options.mpk || this.keyManager;
 
     try {
       const { checkpoint: updatedCheckpoint, anchorResult } =
-        await anchorSignedCheckpoint(checkpoint, this.blockchainService, km);
+        await anchorSignedCheckpoint(checkpoint, this.blockchainService, km, options);
 
       return {
         success: true,
@@ -151,8 +151,8 @@ export class BackendAdapter {
    * @returns {Promise<object>} Full verification report conforming to §9.5.
    */
   async verifyCheckpointOnChain(checkpoint, options = {}) {
-    const km = options.keyManager || this.keyManager;
-    return verifyCheckpointWithBlockchain(checkpoint, this.blockchainService, km);
+    const km = options.keyManager || options.mpk || this.keyManager;
+    return verifyCheckpointWithBlockchain(checkpoint, this.blockchainService, km, options);
   }
 
   /**

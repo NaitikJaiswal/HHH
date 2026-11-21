@@ -6,7 +6,15 @@ import { tmpdir } from 'node:os';
 import { BlockchainService } from '../src/blockchain/blockchainService.js';
 import { BlockchainError, BlockchainErrorCode } from '../src/blockchain/errors.js';
 import { KeyManager } from '../src/keys/keyManager.js';
-import { createCheckpoint, anchorSignedCheckpoint } from '../src/checkpoints/checkpointService.js';
+import { FssStateManager } from '../src/keys/fssStateManager.js';
+import { generateFssMasterState } from '../src/crypto/fssSigner.js';
+import {
+  createCheckpoint,
+  createFssCheckpoint,
+  anchorSignedCheckpoint,
+  CHECKPOINT_FSS_SCHEMA_VERSION,
+} from '../src/checkpoints/checkpointService.js';
+import { verifyCheckpointWithBlockchain } from '../src/verification/verifier.js';
 import { sha256hex } from '../src/crypto/hashing.js';
 
 const { ethers } = await network.create();
@@ -411,6 +419,111 @@ describe('BlockchainService', function () {
 
       expect(err).to.be.instanceOf(BlockchainError);
       expect(err.code).to.equal(BlockchainErrorCode.INVALID_SIGNATURE);
+    });
+
+    it('anchors a valid forward-secure signed checkpoint (FSS) and records Quai blockchain metadata', async function () {
+      const { state } = generateFssMasterState({ maxEpochs: 8 });
+      const statePath = join(tempDir, 'fss_state.json');
+      const fss = new FssStateManager({ statePath });
+      fss.initState(state, true);
+
+      const leafHashes = [
+        sha256hex('fss-event-1'),
+        sha256hex('fss-event-2'),
+        sha256hex('fss-event-3'),
+      ];
+
+      const checkpoint = createFssCheckpoint(
+        {
+          source_id: 'quai-logger',
+          start_sequence: 1,
+          end_sequence: 3,
+          leaf_hashes: leafHashes,
+        },
+        fss
+      );
+
+      const res = await anchorSignedCheckpoint(checkpoint, service, fss.mpk);
+
+      expect(res.verified).to.equal(true);
+      expect(checkpoint.blockchain).to.not.equal(null);
+      expect(checkpoint.blockchain.status).to.equal('CONFIRMED');
+      expect(checkpoint.blockchain.network).to.equal('Quai Orchard Cyprus-1');
+      expect(checkpoint.blockchain.confirmations).to.equal(1);
+      expect(checkpoint.blockchain.contract_address).to.equal(ethers.getAddress(contractAddress));
+      expect(checkpoint.blockchain.transaction_hash).to.match(/^0x[0-9a-fA-F]{64}$/);
+      expect(checkpoint.blockchain.chain_id).to.equal(31337);
+
+      // Verify dual verification succeeds
+      const dualReport = await verifyCheckpointWithBlockchain(checkpoint, service, fss.mpk);
+      expect(dualReport.overallValid).to.equal(true);
+      expect(dualReport.onChainStatus).to.equal('MATCH');
+      expect(dualReport.onChainMatch).to.equal(true);
+      expect(dualReport.signatureValid).to.equal(true);
+      expect(dualReport.merkleRootMatch).to.equal(true);
+    });
+
+    it('rejects anchoring an FSS checkpoint with revoked epoch', async function () {
+      const { state, publicTree } = generateFssMasterState({ maxEpochs: 8 });
+      const statePath = join(tempDir, 'fss_state_rev.json');
+      const fss = new FssStateManager({ statePath });
+      fss.initState(state, true);
+
+      // Advance to epoch 1
+      fss.evolve(publicTree.authPaths[1]);
+
+      const leafHashes = [sha256hex('fss-ev1'), sha256hex('fss-ev2')];
+      const checkpoint = createFssCheckpoint(
+        {
+          source_id: 'quai-logger',
+          start_sequence: 1,
+          end_sequence: 2,
+          leaf_hashes: leafHashes,
+        },
+        fss
+      );
+
+      // Revoke at epoch 1
+      const revocationNotice = fss.revokeEmergency({ reason: 'Compromise test' });
+
+      let err = null;
+      try {
+        await anchorSignedCheckpoint(checkpoint, service, fss.mpk, { revocationNotice });
+      } catch (e) {
+        err = e;
+      }
+
+      expect(err).to.be.instanceOf(BlockchainError);
+      expect(err.code).to.equal(BlockchainErrorCode.INVALID_SIGNATURE);
+    });
+
+    it('dual-verification detects tampered on-chain root for an FSS checkpoint', async function () {
+      const { state } = generateFssMasterState({ maxEpochs: 8 });
+      const statePath = join(tempDir, 'fss_state_tamper.json');
+      const fss = new FssStateManager({ statePath });
+      fss.initState(state, true);
+
+      const leafHashes = [sha256hex('tamper-1'), sha256hex('tamper-2')];
+      const checkpoint = createFssCheckpoint(
+        {
+          source_id: 'quai-logger',
+          start_sequence: 1,
+          end_sequence: 2,
+          leaf_hashes: leafHashes,
+        },
+        fss
+      );
+
+      // Anchor checkpoint
+      await anchorSignedCheckpoint(checkpoint, service, fss.mpk);
+
+      // Tamper stored Merkle root on checkpoint before dual verification
+      checkpoint.merkle_root = sha256hex('tampered-checkpoint-root');
+
+      const dualReport = await verifyCheckpointWithBlockchain(checkpoint, service, fss.mpk);
+      expect(dualReport.overallValid).to.equal(false);
+      expect(dualReport.onChainStatus).to.equal('MISMATCH');
+      expect(dualReport.onChainMatch).to.equal(false);
     });
   });
 });

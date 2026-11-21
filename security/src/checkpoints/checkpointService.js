@@ -707,7 +707,7 @@ function _result(status, failures, checks) {
  * @param {import('../keys/keyManager.js').KeyManager} [keyManager]
  * @returns {Promise<{ checkpoint: SignedCheckpoint, anchorResult: object, verified: boolean }>}
  */
-export async function anchorSignedCheckpoint(checkpoint, blockchainService, keyManager) {
+export async function anchorSignedCheckpoint(checkpoint, blockchainService, keyManagerOrMpk, options = {}) {
   if (!checkpoint || typeof checkpoint !== 'object') {
     throw new BlockchainError(
       BlockchainErrorCode.INVALID_CHECKPOINT,
@@ -720,11 +720,12 @@ export async function anchorSignedCheckpoint(checkpoint, blockchainService, keyM
   }
 
   // 1 & 2: Verify checkpoint structure and signature
-  const verifyResult = verifyCheckpoint(checkpoint, keyManager);
+  const verifyResult = verifyCheckpoint(checkpoint, keyManagerOrMpk, options);
   if (!verifyResult.valid) {
     const isSigError = verifyResult.status === VerificationStatus.INVALID_SIGNATURE;
     const isKeyError = verifyResult.status === VerificationStatus.UNKNOWN_SIGNING_KEY;
-    const errCode = isSigError || isKeyError
+    const isRevoked = verifyResult.status === VerificationStatus.KEY_REVOKED;
+    const errCode = isSigError || isKeyError || isRevoked
       ? BlockchainErrorCode.INVALID_SIGNATURE
       : BlockchainErrorCode.INVALID_CHECKPOINT;
 
@@ -749,12 +750,20 @@ export async function anchorSignedCheckpoint(checkpoint, blockchainService, keyM
 
   // 7: Record transaction metadata
   checkpoint.blockchain = {
-    contractAddress: anchorResult.contractAddress,
-    txHash:          anchorResult.txHash,
-    blockNumber:     anchorResult.blockNumber,
-    chainId:         anchorResult.chainId,
-    anchoredAt:      anchorResult.anchoredAt,
-    gasUsed:         anchorResult.gasUsed,
+    status:           'CONFIRMED',
+    network:          'Quai Orchard Cyprus-1',
+    chain_id:         anchorResult.chainId,
+    chainId:          anchorResult.chainId,
+    contract_address: anchorResult.contractAddress,
+    contractAddress:  anchorResult.contractAddress,
+    transaction_hash: anchorResult.txHash,
+    txHash:           anchorResult.txHash,
+    block_number:     anchorResult.blockNumber,
+    blockNumber:      anchorResult.blockNumber,
+    block_timestamp:  anchorResult.anchoredAt,
+    anchoredAt:       anchorResult.anchoredAt,
+    gasUsed:          anchorResult.gasUsed,
+    confirmations:    1,
   };
 
   // 8 & 9: Retrieve commitment and compare with original checkpoint
