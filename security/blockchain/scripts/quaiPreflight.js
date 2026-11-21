@@ -2,19 +2,22 @@
  * @file quaiPreflight.js
  * @description Preflight validation script for Quai Network Orchard Cyprus-1 testnet.
  *
- * Implements Stage 4.3 requirements:
- *   1. Network parameters: Quai Orchard Cyprus-1 (zone 0,0), chainId 9000, configurable RPC.
- *   2. Network connectivity check: JSON-RPC reachability (eth_chainId, eth_blockNumber).
- *   3. Chain ID verification: ensures remote chain matches expected zone chain ID.
- *   4. Account balance check: verifies account has funds for deployment/anchoring if key/address provided.
- *   5. Diagnostic report: outputs clear diagnostics.
- *   6. Graceful offline fallback: if testnet is unreachable or offline, reports cleanly without throwing/crashing.
+ * Implements Stage 4.3 & Phase 4 Corrective Pass requirements:
+ *   1. Network parameters: Quai Orchard Cyprus-1 (zone 0,0), chainId 15000, configurable RPC.
+ *   2. Mainnet vs Testnet separation: rejects/flags Mainnet (chainId 9) when expecting Testnet (15000).
+ *   3. Network connectivity check: JSON-RPC reachability (eth_chainId, eth_blockNumber).
+ *   4. Chain ID verification: ensures remote chain matches expected zone chain ID.
+ *   5. Account balance check: verifies account has funds for deployment/anchoring if key/address provided.
+ *   6. Diagnostic report: outputs clear diagnostics.
+ *   7. Graceful offline fallback: if testnet is unreachable or offline, reports cleanly without throwing/crashing.
  */
 
 import { ethers } from 'ethers';
 
 export const DEFAULT_QUAI_CYPRUS1_RPC = 'https://orchard.rpc.quai.network/cyprus1';
-export const DEFAULT_QUAI_CYPRUS1_CHAIN_ID = 9000;
+export const DEFAULT_QUAI_CYPRUS1_CHAIN_ID = 15000;
+export const QUAI_ORCHARD_TESTNET_CHAIN_ID = 15000;
+export const QUAI_MAINNET_CHAIN_ID = 9;
 export const QUAI_ZONE_NAME = 'Cyprus-1 (zone-0-0)';
 
 /**
@@ -127,13 +130,17 @@ export async function validateQuaiPreflight(options = {}) {
 
     if (!result.chainIdMatches) {
       result.status = 'CHAIN_ID_MISMATCH';
-      result.message = `Remote chain ID (${remoteChainId}) does not match expected (${expectedChainId}).`;
+      if (remoteChainId === QUAI_MAINNET_CHAIN_ID && expectedChainId === QUAI_ORCHARD_TESTNET_CHAIN_ID) {
+        result.message = `Remote endpoint returned Quai Mainnet chain ID (${remoteChainId}), but expected Orchard Testnet chain ID (${expectedChainId}). Mainnet transactions are prohibited in testnet environment.`;
+      } else {
+        result.message = `Remote chain ID (${remoteChainId}) does not match expected (${expectedChainId}).`;
+      }
     } else if (accountAddress && !result.hasSufficientBalance) {
       result.status = 'LOW_BALANCE';
       result.message = `Submitter account ${accountAddress} has 0 QUAI balance.`;
     } else {
       result.status = 'READY';
-      result.message = `Quai Network ${QUAI_ZONE_NAME} is reachable and responsive.`;
+      result.message = `Quai Network ${QUAI_ZONE_NAME} is reachable and responsive (chain ID ${remoteChainId}).`;
     }
   } catch (err) {
     // Graceful offline fallback

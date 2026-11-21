@@ -21,7 +21,7 @@ export default {
     quaiOrchardCyprus1: {
       type: "http",
       url: process.env.QUAI_RPC_URL || "https://orchard.rpc.quai.network/cyprus1",
-      chainId: Number.parseInt(process.env.QUAI_CHAIN_ID || "9000", 10),
+      chainId: Number.parseInt(process.env.QUAI_CHAIN_ID || "15000", 10),
       accounts: process.env.QUAI_PRIVATE_KEY ? [process.env.QUAI_PRIVATE_KEY] : "remote",
     },
   },
