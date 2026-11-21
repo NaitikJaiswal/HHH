@@ -13,13 +13,15 @@ The project combines secure log collection, cryptographic integrity verification
 
 ### Core Capabilities
 
-1. **Cryptographic Hash Chaining:** Logs are sequentially hashed using SHA-256 to help detect modifications and broken log sequences.
-2. **Ed25519 Signed Checkpoints:** Periodic checkpoints use asymmetric digital signatures to verify the authenticity of recorded chain states.
-3. **Immutable Evidence Storage:** The architecture supports AWS S3 Object Lock for protected evidence retention.
-4. **Tamper Detection and Incident Management:** Detects suspicious sequence gaps, broken hash chains, altered payloads, and collector disconnections.
-5. **Python Log Collector:** Collects logs and supports local SQLite queuing, retry mechanisms, and heartbeat monitoring.
-6. **React Dashboard:** Provides an interface for viewing security logs, incidents, system metrics, and forensic information.
-7. **Forensic Analysis:** Supports event correlation, attack timeline reconstruction, anomaly detection, and report generation.
+1. **Cryptographic Hash Chaining:** Logs are sequentially hashed using authoritative `LOGN-HASH-v1` (RFC 8785 canonical JSON + SHA-256) to guarantee immutable sequence continuity.
+2. **Adaptive Forward-Secure Checkpoints (MKT-FSS):** Checkpoints are signed with Malkin-Katz-Salil tree-based forward-secure keys. Compromise of an active epoch key mathematically prevents forgery of past epochs.
+3. **Quai Network Blockchain Anchoring:** Merkle roots are permanently anchored to the Quai Network Orchard Cyprus-1 Testnet (Chain ID 15000) via `SecureLogAnchor.sol`.
+4. **Dual-Algorithm Merkle Proofs:** Independent inclusion proofs supporting both smart contract odd-node duplication (`HHH-CONTRACT-DUP-v1`) and Certificate Transparency (`RFC-6962`).
+5. **Independent Verification CLI:** Command-line tool (`bin/hhh`) for zero-trust offline verification of logs, chains, checkpoints, Merkle proofs, evidence packages, and forensic reports.
+6. **Immutable Evidence Vault & Court-Ready Dossiers:** Sealed evidence bundles with cryptographic manifests, full chain-of-custody tracking, and incident dossiers exported in JSON and Markdown.
+7. **Tamper Detection and Incident Management:** Real-time detection of sequence gaps, broken hash chains, altered payloads, and collector disconnections.
+8. **Python Edge Collector:** High-resilience collector with local SQLite WAL queuing, exponential retry backoff, and heartbeat monitoring.
+9. **React Forensics Dashboard:** Production-grade 14-page dashboard for real-time monitoring, 3D evidence graph inspection, and operational control.
 
 ---
 
@@ -204,38 +206,54 @@ python demonstration.py
 
 ---
 
-## 6. Testing
+## 6. Comprehensive Verification & Testing
 
-### Backend
-
+### 1. 20-Step End-to-End Product Lifecycle Suite
 ```bash
-cd backend
-npm test
+node --test tests/e2eProductWorkflow.test.js
 ```
 
-### Python Tests
-
+### 2. Independent Verification CLI Suite
 ```bash
-python -m unittest discover tests
+node --test tests/cli.test.js
 ```
 
-### Storage Tests
-
+### 3. Backend Integration Suite (13 Vitest Suites, 99 Tests)
 ```bash
-node --test tests/test_storage.js
-node --test tests/test_recovery.js
+cd backend && npm test
 ```
 
-Run the commands from the appropriate project directory and verify that the corresponding test files exist.
+### 4. Cryptographic Security Engine Suite (138 Tests)
+```bash
+cd security && node --test tests/*.test.js
+```
+
+### 5. Smart Contract Suite (110 Hardhat Tests)
+```bash
+cd security && npm run test:contracts
+```
+
+### 6. Python Agent & Forensic Telemetry Suite (68 Tests)
+```bash
+.venv/bin/python3 -m unittest discover -s tests -p "test_*.py"
+```
+
+### 7. Frontend Production Build
+```bash
+cd frontend && npm run build
+```
 
 ---
 
-## 7. Documentation
+## 7. Documentation & Reference Manuals
 
+- [CLI Reference Manual](docs/CLI_REFERENCE.md) – Commands, exit codes, and examples for `bin/hhh`.
+- [Quai Network Blockchain Anchoring](docs/BLOCKCHAIN_ANCHORING.md) – Smart contract, Cyprus-1 testnet (Chain ID 15000), and receipts.
+- [Forward-Secure Logging Specification](docs/FORWARD_SECURE_LOGGING.md) – MKT-FSS tree design, key derivation, and revocation.
+- [Live Demonstration Script](docs/DEMO_SCRIPT.md) – Step-by-step walkthrough for live evaluator demonstrations.
 - [Architecture Specification](docs/architecture.md)
 - [Backend API Contract](docs/api-contract.md)
 - [Security and Cryptographic Design](docs/security-design.md)
-- [Backend Documentation](backend/README.md)
 
 ---
 
@@ -244,14 +262,16 @@ Run the commands from the appropriate project directory and verify that the corr
 | Component | Technology |
 |---|---|
 | Backend | Node.js, Express.js |
-| Frontend | React.js |
-| Database | MongoDB |
-| Log Collection | Python |
-| Local Queue | SQLite |
-| Cryptographic Hashing | SHA-256 |
-| Digital Signatures | Ed25519 |
-| Evidence Storage | AWS S3 Object Lock (planned/integrated as configured) |
-| Version Control | Git and GitHub |
+| Frontend | React.js, Tailwind CSS, Lucide Icons, Three.js |
+| Blockchain Anchoring | Quai Network Orchard Cyprus-1 Testnet (Chain ID 15000, `SecureLogAnchor.sol`) |
+| Forward-Secure Signatures | Malkin-Katz-Salil (MKT-FSS) Tree Signatures with HKDF-SHA256 ratcheting |
+| Cryptographic Verification | HHH Verification CLI (`bin/hhh`) |
+| Canonical Hashing | RFC 8785 Canonical JSON + SHA-256 (`LOGN-HASH-v1`) |
+| Merkle Trees | Dual-Algorithm: `HHH-CONTRACT-DUP-v1` & `RFC-6962` |
+| Database | MongoDB & Mongoose |
+| Edge Log Collection | Python 3, SQLite WAL Queuing |
+| Evidence Storage | Sealed JSONL/ZIP Enclaves & AWS S3 Object Lock Compliance |
+| Version Control | Git and GitHub (`feature/forward-secure-logging`) |
 
 ---
 
