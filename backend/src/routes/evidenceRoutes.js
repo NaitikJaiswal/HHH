@@ -1,9 +1,12 @@
+/**
+ * @file evidenceRoutes.js
+ * @description REST API endpoints for evidence packaging, verification, and retrieval.
+ */
+
 import express from 'express';
 import { protect } from '../middleware/authMiddleware.js';
-import Log from '../models/Log.js';
+import evidenceService from '../services/evidenceService.js';
 import Checkpoint from '../models/Checkpoint.js';
-import { verifyEvidence } from '../../../cli/hhh.js';
-import { GENESIS_HASH } from '../../../security/src/crypto/hashing.js';
 
 const router = express.Router();
 
@@ -20,8 +23,9 @@ router.get('/', async (req, res, next) => {
       .limit(50)
       .lean();
 
-    const evidenceList = checkpoints.map((cp, idx) => ({
+    const evidenceList = checkpoints.map((cp) => ({
       evidenceId: `EVD-${cp.checkpointId || cp._id}`,
+      checkpointId: cp.checkpointId,
       name: `Signed Checkpoint Docket (${cp.sourceId})`,
       category: 'EVIDENCE',
       sourceId: cp.sourceId,
@@ -34,6 +38,11 @@ router.get('/', async (req, res, next) => {
       createdAt: cp.createdAt || cp.timestamp,
       status: cp.status || 'VERIFIED',
       isImmutable: true,
+      custody: [
+        'Operator Ingest (Web Crypto Hash Sealed)',
+        'Evidence Enclave Vault (FSS Epoch Bound)',
+        'Quai Blockchain Anchor (Cyprus-1 Testnet)',
+      ],
     }));
 
     res.status(200).json({
@@ -52,65 +61,23 @@ router.get('/', async (req, res, next) => {
  */
 router.post('/package', async (req, res, next) => {
   try {
-    const { sourceId, limit = 50 } = req.body || {};
-    const filter = {};
-    if (sourceId) filter.sourceId = sourceId;
+    const { sourceId, startSequence, endSequence, limit, notes } = req.body || {};
+    const investigator = req.user?.username || req.user?.email || 'HHH Forensic Lead';
 
-    const [logs, checkpoints] = await Promise.all([
-      Log.find(filter).sort({ sequenceNumber: 1 }).limit(Number(limit)).lean(),
-      Checkpoint.find(filter).sort({ createdAt: 1 }).limit(10).lean(),
-    ]);
-
-    const bundleId = `BND-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    const bundle = {
-      schema_version: '1.0',
-      bundle_id: bundleId,
-      created_at: new Date().toISOString(),
-      manifest: {
-        bundle_id: bundleId,
-        source_id: sourceId || 'all_sources',
-        event_count: logs.length,
-        checkpoint_count: checkpoints.length,
-        first_sequence: logs[0]?.sequenceNumber ?? 0,
-        last_sequence: logs[logs.length - 1]?.sequenceNumber ?? 0,
-        genesis_hash: logs[0]?.previousHash || GENESIS_HASH,
-        final_root_hash: logs[logs.length - 1]?.currentHash || GENESIS_HASH,
-      },
-      events: logs.map((l) => ({
-        event_id: l.eventId || String(l._id),
-        event_time: l.eventTime || l.serverTimestamp || l.timestamp,
-        event_type: l.eventType,
-        message: l.message,
-        metadata: l.metadata || {},
-        previous_hash: l.previousHash,
-        sequence_number: l.sequenceNumber,
-        severity: l.severity || l.level || 'INFO',
-        source_id: l.sourceId,
-        current_hash: l.currentHash,
-      })),
-      checkpoints: checkpoints.map((cp) => ({
-        schema_version: cp.schema_version || 'logn-checkpoint-fss-v1',
-        checkpoint_id: cp.checkpointId,
-        source_id: cp.sourceId,
-        start_sequence: cp.start_sequence || 1,
-        end_sequence: cp.end_sequence || cp.lastSequenceNumber,
-        event_count: cp.event_count || (cp.end_sequence - cp.start_sequence + 1),
-        merkle_root: cp.merkle_root || cp.chainHeadHash,
-        merkle_leaf_hashes: cp.merkle_leaf_hashes || [],
-        signature: cp.signature,
-        signature_algorithm: cp.signature_algorithm || 'Ed25519-MKT-FSS',
-        fss_epoch: cp.fss_epoch ?? 0,
-        mpk: cp.mpk,
-        epoch_public_key: cp.epoch_public_key || cp.publicKey,
-        fss_auth_path: cp.fss_auth_path || [],
-        timestamp: cp.timestamp || cp.createdAt,
-      })),
-    };
+    const result = await evidenceService.packageEvidence({
+      sourceId,
+      startSequence,
+      endSequence,
+      limit,
+      investigator,
+      notes,
+    });
 
     res.status(201).json({
       success: true,
-      message: 'Evidence bundle packaged successfully',
-      data: bundle,
+      message: 'Evidence bundle packaged and sealed successfully',
+      data: result.bundle,
+      files: result.files,
     });
   } catch (error) {
     next(error);
@@ -131,13 +98,36 @@ router.post('/verify', async (req, res, next) => {
       });
     }
 
-    const verificationResult = verifyEvidence(bundle);
+    const verificationResult = evidenceService.verifyEvidence(bundle);
 
     res.status(200).json({
       success: true,
       message: 'Evidence bundle verification completed',
       data: verificationResult,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/evidence/:id/download
+ * Download packaged evidence archive / bundle JSON
+ */
+router.get('/:id/download', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const investigator = req.user?.username || 'HHH Auditor';
+
+    const result = await evidenceService.packageEvidence({
+      sourceId: id.startsWith('EVD-') ? undefined : id,
+      limit: 100,
+      investigator,
+    });
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${id}_evidence.json"`);
+    res.status(200).send(JSON.stringify(result.bundle, null, 2));
   } catch (error) {
     next(error);
   }

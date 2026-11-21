@@ -373,6 +373,16 @@ export const forensicsApi = {
     if (!res.ok) throw new Error(data.message || 'Failed to generate forensic report');
     return data.data;
   },
+
+  async getTimeline(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    const res = await fetch(`${API_BASE}/forensics/timeline${qs ? `?${qs}` : ''}`, {
+      headers: getAuthHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Failed to fetch forensic timeline');
+    return data.data;
+  },
 };
 
 export default {

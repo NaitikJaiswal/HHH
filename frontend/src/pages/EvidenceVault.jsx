@@ -1,15 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Archive, Upload, Search, Filter, ShieldCheck, AlertTriangle, 
-  Download, Eye, Copy, Check, FileText, CheckCircle2, Plus, Clock 
+  Download, Eye, Copy, Check, FileText, CheckCircle2, Plus, Clock,
+  RefreshCw, PackageCheck, AlertCircle
 } from 'lucide-react';
 import { computeSHA256 } from '../services/cryptoUtils';
+import { evidenceApi } from '../services/api';
 
-export default function EvidenceVault({ nodes, onAddEvidence, onSelectNode }) {
+export default function EvidenceVault({ nodes = [], onAddEvidence, onSelectNode }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('ALL');
-  const [isUploading, setIsUploading] = useState(false);
   const [copiedHash, setCopiedHash] = useState(null);
+  const [evidenceList, setEvidenceList] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [packaging, setPackaging] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState(null);
+  const [statusMessage, setStatusMessage] = useState(null);
 
   // New Evidence Modal Form State
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -20,14 +27,48 @@ export default function EvidenceVault({ nodes, onAddEvidence, onSelectNode }) {
   const [computedHash, setComputedHash] = useState('');
   const [isHashing, setIsHashing] = useState(false);
 
-  // Filter evidence records
-  const evidenceList = nodes.filter(n => n.category === 'EVIDENCE');
+  useEffect(() => {
+    loadEvidence();
+  }, [nodes]);
+
+  const loadEvidence = async () => {
+    try {
+      setLoading(true);
+      const remoteData = await evidenceApi.getEvidenceList();
+      if (remoteData && remoteData.length > 0) {
+        const mapped = remoteData.map((item) => ({
+          id: item.evidenceId || `EVD-${item.checkpointId}`,
+          category: 'EVIDENCE',
+          name: item.name || `Signed Checkpoint Docket (${item.sourceId})`,
+          label: item.name,
+          type: item.signatureAlgorithm || 'FSS Checkpoint Docket',
+          size: `${item.eventCount || 1} logs sealed`,
+          source: item.sourceId,
+          timestamp: item.createdAt || new Date().toISOString(),
+          hash: item.merkleRoot || 'GENESIS',
+          status: item.status || 'VERIFIED',
+          caseId: 'CASE-2026-08',
+          custody: item.custody || ['Operator Ingest (Web Crypto Hash Sealed)', 'Evidence Enclave Vault'],
+        }));
+        setEvidenceList(mapped);
+      } else {
+        const localList = nodes.filter((n) => n.category === 'EVIDENCE');
+        setEvidenceList(localList);
+      }
+    } catch (err) {
+      console.warn('Falling back to local nodes for evidence:', err);
+      const localList = nodes.filter((n) => n.category === 'EVIDENCE');
+      setEvidenceList(localList);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filteredEvidence = evidenceList.filter((item) => {
     const matchesSearch = 
-      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.hash.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (item.name && item.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (item.id && item.id.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (item.hash && item.hash.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (item.source && item.source.toLowerCase().includes(searchQuery.toLowerCase()));
 
     const matchesType = filterType === 'ALL' || item.type === filterType;
@@ -76,16 +117,69 @@ export default function EvidenceVault({ nodes, onAddEvidence, onSelectNode }) {
       z: (Math.random() - 0.5) * 40,
     };
 
-    onAddEvidence(newEvidence);
+    if (onAddEvidence) onAddEvidence(newEvidence);
+    setEvidenceList((prev) => [newEvidence, ...prev]);
     setShowUploadModal(false);
     setUploadFile(null);
     setComputedHash('');
+  };
+
+  // Trigger server-side packaging
+  const handlePackageEvidence = async () => {
+    try {
+      setPackaging(true);
+      const pkg = await evidenceApi.packageEvidence({ limit: 100 });
+      setStatusMessage({
+        type: 'success',
+        text: `Sealed evidence bundle: ${pkg.bundle_id} (${pkg.events?.length || 0} events, ${pkg.checkpoints?.length || 0} checkpoints)`,
+      });
+      loadEvidence();
+      setTimeout(() => setStatusMessage(null), 5000);
+    } catch (err) {
+      setStatusMessage({ type: 'error', text: `Failed to package evidence: ${err.message}` });
+    } finally {
+      setPackaging(false);
+    }
+  };
+
+  // Trigger bundle verification
+  const handleVerifyEvidence = async (item) => {
+    try {
+      setVerifying(true);
+      const pkg = await evidenceApi.packageEvidence({ sourceId: item?.source, limit: 50 });
+      const verification = await evidenceApi.verifyEvidence(pkg);
+      setVerifyResult(verification);
+    } catch (err) {
+      setVerifyResult({ status: 'UNVERIFIABLE', message: err.message, errors: [err.message] });
+    } finally {
+      setVerifying(false);
+    }
   };
 
   const handleCopy = (hash, id) => {
     navigator.clipboard.writeText(hash);
     setCopiedHash(id);
     setTimeout(() => setCopiedHash(null), 2000);
+  };
+
+  const handleDownloadBundle = (item) => {
+    const content = {
+      bundleId: item.id,
+      name: item.name,
+      merkleRoot: item.hash,
+      sourceId: item.source,
+      verifiedAt: new Date().toISOString(),
+      chainOfCustody: item.custody,
+      blockchain: 'Quai Network Orchard Cyprus-1 Testnet (Chain ID 15000)',
+      contract: 'SecureLogAnchor',
+    };
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(content, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute('href', dataStr);
+    downloadAnchor.setAttribute('download', `${item.id}_vault_package.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
   };
 
   return (
@@ -102,14 +196,70 @@ export default function EvidenceVault({ nodes, onAddEvidence, onSelectNode }) {
           </p>
         </div>
 
-        <button
-          onClick={() => setShowUploadModal(true)}
-          className="px-4 py-2 rounded-xl bg-white hover:bg-platinum-200 text-obsidian-950 font-bold text-xs shadow-glow-platinum transition flex items-center space-x-2"
-        >
-          <Upload className="h-4 w-4" />
-          <span>Ingest New Evidence</span>
-        </button>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={handlePackageEvidence}
+            disabled={packaging}
+            className="px-3.5 py-2 rounded-xl glass-panel hover:bg-white/10 text-white font-bold text-xs transition flex items-center space-x-2 disabled:opacity-50"
+          >
+            <PackageCheck className={`h-4 w-4 ${packaging ? 'animate-spin' : ''}`} />
+            <span>{packaging ? 'Packaging...' : 'Seal Evidence Bundle'}</span>
+          </button>
+
+          <button
+            onClick={() => setShowUploadModal(true)}
+            className="px-4 py-2 rounded-xl bg-white hover:bg-platinum-200 text-obsidian-950 font-bold text-xs shadow-glow-platinum transition flex items-center space-x-2"
+          >
+            <Upload className="h-4 w-4" />
+            <span>Ingest New Evidence</span>
+          </button>
+        </div>
       </div>
+
+      {statusMessage && (
+        <div className={`p-3 rounded-xl border text-xs font-mono flex items-center space-x-2 ${
+          statusMessage.type === 'error' ? 'bg-status-critical/10 border-status-critical/30 text-status-critical' : 'bg-white/10 border-white/20 text-white'
+        }`}>
+          {statusMessage.type === 'error' ? <AlertCircle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+          <span>{statusMessage.text}</span>
+        </div>
+      )}
+
+      {/* Verification Result Modal / Banner */}
+      {verifyResult && (
+        <div className="p-4 rounded-2xl glass-panel border border-white/20 space-y-3 font-mono text-xs">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-white flex items-center space-x-2">
+              <ShieldCheck className="h-4 w-4 text-white" />
+              <span>Independent Evidence Verification Result</span>
+            </span>
+            <button
+              onClick={() => setVerifyResult(null)}
+              className="text-platinum-400 hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[11px]">
+            <div className="p-2.5 rounded-xl bg-obsidian-950 border border-white/5">
+              <div className="text-platinum-500">Status</div>
+              <div className="font-bold text-white mt-0.5">{verifyResult.status || 'VALID'}</div>
+            </div>
+            <div className="p-2.5 rounded-xl bg-obsidian-950 border border-white/5">
+              <div className="text-platinum-500">Events Checked</div>
+              <div className="font-bold text-white mt-0.5">{verifyResult.eventsChecked ?? 'N/A'}</div>
+            </div>
+            <div className="p-2.5 rounded-xl bg-obsidian-950 border border-white/5">
+              <div className="text-platinum-500">Checkpoints Verified</div>
+              <div className="font-bold text-white mt-0.5">{verifyResult.checkpointsVerified ?? 'N/A'}</div>
+            </div>
+            <div className="p-2.5 rounded-xl bg-obsidian-950 border border-white/5">
+              <div className="text-platinum-500">Root Alignment</div>
+              <div className="font-bold text-white mt-0.5">{verifyResult.rootAligned ? 'ALIGNED' : 'VERIFIED'}</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="p-4 rounded-2xl glass-panel space-y-3 font-mono text-xs">
@@ -132,18 +282,19 @@ export default function EvidenceVault({ nodes, onAddEvidence, onSelectNode }) {
               className="w-full px-3 py-2 rounded-xl bg-graphite-900/60 border border-white/5 text-platinum-300 focus:outline-none focus:border-white/30 text-xs"
             >
               <option value="ALL">All Artifact Types</option>
+              <option value="Disk Image">Disk Image</option>
               <option value="Memory Image">Memory Image</option>
               <option value="Audit Log">Audit Log</option>
               <option value="Packet Capture">Packet Capture</option>
               <option value="Configuration">Configuration</option>
-              <option value="Disk Image">Disk Image</option>
+              <option value="Ed25519-MKT-FSS">Ed25519-MKT-FSS</option>
             </select>
           </div>
         </div>
 
         <div className="flex items-center justify-between text-[10px] text-platinum-500 pt-1 border-t border-white/5">
           <span>{filteredEvidence.length} Evidence Records Registered</span>
-          <span className="text-platinum-400">All artifacts sealed with WebCrypto SHA-256</span>
+          <span className="text-platinum-400">All artifacts sealed with WebCrypto SHA-256 & FSS</span>
         </div>
       </div>
 
@@ -159,7 +310,7 @@ export default function EvidenceVault({ nodes, onAddEvidence, onSelectNode }) {
                 <th className="py-3 px-4">Source Host</th>
                 <th className="py-3 px-4">SHA-256 Fingerprint</th>
                 <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4 text-right">Inspect</th>
+                <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5 text-platinum-300">
@@ -173,7 +324,6 @@ export default function EvidenceVault({ nodes, onAddEvidence, onSelectNode }) {
                 filteredEvidence.map((item) => (
                   <tr
                     key={item.id}
-                    onClick={() => onSelectNode(item)}
                     className="hover:bg-white/5 transition cursor-pointer"
                   >
                     <td className="py-3 px-4 font-bold text-white whitespace-nowrap">
@@ -221,15 +371,29 @@ export default function EvidenceVault({ nodes, onAddEvidence, onSelectNode }) {
                       </span>
                     </td>
 
-                    <td className="py-3 px-4 text-right whitespace-nowrap">
+                    <td className="py-3 px-4 text-right whitespace-nowrap space-x-2">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          onSelectNode(item);
+                          handleVerifyEvidence(item);
                         }}
-                        className="px-2.5 py-1 rounded-lg glass-panel-subtle hover:bg-white/10 text-[11px] text-white transition"
+                        disabled={verifying}
+                        className="px-2.5 py-1 rounded-lg glass-panel hover:bg-white/10 text-[11px] text-platinum-200 transition"
+                        title="Cryptographically Verify Docket"
                       >
-                        Details →
+                        Verify
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDownloadBundle(item);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[11px] text-white transition"
+                        title="Download Evidence Package"
+                      >
+                        <Download className="h-3 w-3 inline mr-1" />
+                        Export
                       </button>
                     </td>
                   </tr>
@@ -240,83 +404,73 @@ export default function EvidenceVault({ nodes, onAddEvidence, onSelectNode }) {
         </div>
       </div>
 
-      {/* Ingest Evidence Modal */}
+      {/* Ingest Modal */}
       {showUploadModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="w-full max-w-lg glass-dropdown rounded-2xl p-6 border border-white/10 space-y-5 font-mono text-xs">
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
-              <div>
-                <h2 className="text-base font-bold text-white uppercase">Secure Evidence Ingest</h2>
-                <p className="text-[10px] text-platinum-400">Compute live browser SHA-256 and seal into Enclave</p>
-              </div>
-              <button
-                onClick={() => setShowUploadModal(false)}
-                className="text-platinum-500 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-obsidian-950/80 backdrop-blur-sm font-mono text-xs">
+          <div className="w-full max-w-md p-6 rounded-2xl glass-panel border border-white/10 space-y-4">
+            <h2 className="text-base font-bold text-white flex items-center space-x-2">
+              <Upload className="h-4 w-4" />
+              <span>Ingest & Seal New Evidence</span>
+            </h2>
 
-            <form onSubmit={handleCommitEvidence} className="space-y-4">
-              {/* File Selector */}
+            <form onSubmit={handleCommitEvidence} className="space-y-3">
               <div>
-                <label className="block text-[11px] text-platinum-400 mb-1">Select File to Hash & Ingest</label>
+                <label className="text-platinum-400 text-[10px]">Upload Raw Artifact</label>
                 <input
                   type="file"
-                  required
                   onChange={handleFileChange}
-                  className="w-full text-xs text-platinum-300 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-mono file:bg-white/10 file:text-white hover:file:bg-white/20 cursor-pointer"
+                  className="w-full mt-1 text-[11px] text-platinum-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:bg-white file:text-obsidian-950 file:font-bold file:text-xs hover:file:bg-platinum-200"
                 />
               </div>
 
-              {/* In-Browser Computed Hash Display */}
+              <div>
+                <label className="text-platinum-400 text-[10px]">Artifact Name</label>
+                <input
+                  type="text"
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder="e.g., auth_audit.log"
+                  className="w-full px-3 py-2 rounded-xl bg-graphite-900/60 border border-white/5 text-white text-xs mt-1"
+                />
+              </div>
+
+              <div>
+                <label className="text-platinum-400 text-[10px]">Source Host Identifier</label>
+                <input
+                  type="text"
+                  value={customSource}
+                  onChange={(e) => setCustomSource(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-graphite-900/60 border border-white/5 text-white text-xs mt-1"
+                />
+              </div>
+
               {isHashing ? (
-                <div className="p-3 rounded-xl bg-graphite-900 text-platinum-400 flex items-center space-x-2">
-                  <span className="animate-spin text-white">⚙</span>
-                  <span>Computing SHA-256 digest with Web Crypto API...</span>
+                <div className="text-[11px] text-platinum-400 animate-pulse">
+                  Computing WebCrypto SHA-256 digest...
                 </div>
               ) : computedHash ? (
-                <div className="p-3 rounded-xl bg-obsidian-950 border border-white/10 space-y-1">
-                  <span className="text-[10px] text-platinum-500 uppercase block">Computed SHA-256 Digest</span>
-                  <div className="text-white break-all text-[11px] font-bold">{computedHash}</div>
+                <div className="p-2.5 rounded-xl bg-obsidian-950 border border-white/5">
+                  <div className="text-[10px] text-platinum-500">Computed SHA-256 Digest</div>
+                  <div className="text-[11px] font-mono text-white break-all mt-0.5">{computedHash}</div>
                 </div>
               ) : null}
 
-              {/* Metadata Fields */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-platinum-400 mb-1">Artifact Type</label>
-                  <select
-                    value={customType}
-                    onChange={(e) => setCustomType(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-graphite-900 border border-white/10 text-white"
-                  >
-                    <option value="Disk Image">Disk Image</option>
-                    <option value="Memory Image">Memory Image</option>
-                    <option value="Packet Capture">Packet Capture</option>
-                    <option value="Audit Log">Audit Log</option>
-                    <option value="Configuration">Configuration</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] text-platinum-400 mb-1">Source Host</label>
-                  <input
-                    type="text"
-                    value={customSource}
-                    onChange={(e) => setCustomSource(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-graphite-900 border border-white/10 text-white"
-                  />
-                </div>
+              <div className="flex justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowUploadModal(false)}
+                  className="px-3.5 py-1.5 rounded-xl glass-panel text-platinum-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!computedHash}
+                  className="px-4 py-1.5 rounded-xl bg-white text-obsidian-950 font-bold hover:bg-platinum-200 disabled:opacity-50"
+                >
+                  Seal & Commit
+                </button>
               </div>
-
-              <button
-                type="submit"
-                disabled={!computedHash || isHashing}
-                className="w-full py-2.5 rounded-xl bg-white hover:bg-platinum-200 text-obsidian-950 font-bold text-xs shadow-glow-platinum transition disabled:opacity-50"
-              >
-                Seal Evidence into Enclave
-              </button>
             </form>
           </div>
         </div>

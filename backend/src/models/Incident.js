@@ -22,6 +22,7 @@ const incidentSchema = new mongoose.Schema(
         'CHECKPOINT_MISSING_LOG',
         'COLLECTOR_DISCONNECTED',
         'STORAGE_VERIFICATION_FAILED',
+        'FORENSIC_INVESTIGATION',
       ],
       index: true,
     },
