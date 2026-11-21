@@ -73,6 +73,9 @@ frontend/.env.local
 *.cert
 /keys/
 backend/keys/
+vault/
+backend/vault/
+*fss_state*.json
 !security/src/keys/
 
 # =====================================

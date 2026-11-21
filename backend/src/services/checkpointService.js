@@ -16,6 +16,20 @@ import { generateFssMasterState } from '../../../security/src/crypto/fssSigner.j
 
 let activeFssManager = null;
 
+// Concurrency lock to prevent race conditions during concurrent checkpoint generation per source
+const checkpointLocks = new Map();
+
+const acquireCheckpointLock = async (sourceId) => {
+  while (checkpointLocks.get(sourceId)) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  checkpointLocks.set(sourceId, true);
+};
+
+const releaseCheckpointLock = (sourceId) => {
+  checkpointLocks.delete(sourceId);
+};
+
 /**
  * Returns the singleton FssStateManager instance for forward-secure checkpoint signing.
  * Fails safely if state is corrupted, rolled back, or revoked without silently regenerating keys.
@@ -73,6 +87,9 @@ export const createCheckpoint = async (sourceId, options = {}) => {
   if (!sourceId || typeof sourceId !== 'string') {
     throw new TypeError('createCheckpoint: sourceId must be a non-empty string');
   }
+
+  await acquireCheckpointLock(sourceId);
+  try {
 
   // 1. Resolve log window and leaf hashes
   let startSequence = options.start_sequence || options.startSequence;
@@ -170,7 +187,10 @@ export const createCheckpoint = async (sourceId, options = {}) => {
     status: 'VALID',
   });
 
-  return checkpointDoc;
+    return checkpointDoc;
+  } finally {
+    releaseCheckpointLock(sourceId);
+  }
 };
 
 /**
@@ -304,6 +324,8 @@ export const getFssStatus = () => {
   return {
     mpk: manager.mpk,
     epoch: manager.epoch,
+    currentEpoch: manager.epoch,
+    maxEpochs: manager.maxEpochs,
     isRevoked: Boolean(manager.revocationNotice),
     revocationNotice: manager.revocationNotice,
   };

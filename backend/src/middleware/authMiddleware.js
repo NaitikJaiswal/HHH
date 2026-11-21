@@ -59,7 +59,23 @@ export const optionalAuth = (req, res, next) => {
   next();
 };
 
+/**
+ * Restricts access to users with specified roles
+ */
+export const restrictTo = (...roles) => {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: `Forbidden: requires one of the following roles: ${roles.join(', ')}`,
+      });
+    }
+    next();
+  };
+};
+
 export default {
   protect,
   optionalAuth,
+  restrictTo,
 };

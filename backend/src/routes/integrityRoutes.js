@@ -10,7 +10,7 @@ import {
   revokeFssEmergency,
   getBlockchainStatus,
 } from '../controllers/integrityController.js';
-import { protect } from '../middleware/authMiddleware.js';
+import { protect, restrictTo } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -25,8 +25,8 @@ router.get('/alerts', getAlerts);
 
 // FSS and Blockchain endpoints
 router.get('/fss/status', getFssState);
-router.post('/fss/evolve', evolveFssEpoch);
-router.post('/fss/revoke', revokeFssEmergency);
+router.post('/fss/evolve', restrictTo('admin', 'security_analyst'), evolveFssEpoch);
+router.post('/fss/revoke', restrictTo('admin', 'security_analyst'), revokeFssEmergency);
 router.get('/blockchain/status', getBlockchainStatus);
 
 export default router;
