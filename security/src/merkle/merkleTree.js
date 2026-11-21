@@ -2,19 +2,28 @@
  * @module merkleTree
  * @description Merkle tree construction and proof generation/verification.
  *
- * Implements the exact algorithm specified in:
- *   docs/technical-integration-contract.md §6
+ * Supports two distinct Merkle tree algorithms with explicit schema versioning:
  *
- * Key design decisions (per contract):
- *   - Input: ordered array of Log.currentHash hex-64 strings (authoritative chain hashes)
- *   - Leaf encoding:     SHA-256(0x00 || hexToBytes(currentHash))   — domain tag 0x00
- *   - Internal nodes:   SHA-256(0x01 || hexToBytes(left) || hexToBytes(right)) — domain tag 0x01
- *   - Odd-node rule:    last node in a layer is duplicated (paired with itself)
- *   - Empty tree root:  SHA-256(0x00) = "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
- *   - All results are lowercase hex-64 strings
+ * 1. "HHH-CONTRACT-DUP-v1" (Schema: 'logn-merkle-v1' or 'logn-merkle-dup-v1') [DEFAULT]:
+ *    - Implements docs/technical-integration-contract.md §6
+ *    - Layer reduction tree with odd-node duplication (Bitcoin-style)
+ *    - Leaf encoding:     SHA-256(0x00 || hexToBytes(currentHash))   — domain tag 0x00
+ *    - Internal nodes:    SHA-256(0x01 || hexToBytes(left) || hexToBytes(right)) — domain tag 0x01
+ *    - Odd-node rule:     last node in an odd layer is duplicated (paired with itself)
+ *    - Empty tree root:   SHA-256(0x00) = "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
+ *    - Preserves 100% backward compatibility with existing HHH checkpoints, contracts, and tests.
  *
- * Domain separation between leaf and internal nodes prevents second-preimage
- * attacks where an internal node could be mistaken for a leaf hash.
+ * 2. "RFC-6962" (Schema: 'logn-merkle-rfc6962-v1'):
+ *    - Implements authentic RFC 6962 Certificate Transparency §2.1 & §2.1.1
+ *    - Splits at largest power of 2 less than n: k = 2^(floor(log2(n-1)))
+ *    - Never duplicates nodes for non-power-of-2 tree sizes
+ *    - Leaf encoding:     SHA-256(0x00 || hexToBytes(currentHash))
+ *    - Internal nodes:    SHA-256(0x01 || hexToBytes(left) || hexToBytes(right))
+ *    - Empty tree root:   SHA-256("") = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+ *
+ * Note on convergence: For n = 1 and n = 2 (and all powers of 2 with balanced splits),
+ * both algorithms evaluate to the exact same root and proof paths. They diverge on
+ * n = 0 (empty tree) and non-power-of-two sizes (e.g. n = 3, 5, 6, 7).
  */
 
 import { createHash } from 'node:crypto';
@@ -34,10 +43,24 @@ const LEAF_TAG = Buffer.from([0x00]);
 const NODE_TAG = Buffer.from([0x01]);
 
 /**
- * Standard Merkle tree schema version.
+ * Standard Merkle tree schema version for contract duplicated-node trees.
  * @type {string}
  */
 export const MERKLE_SCHEMA_VERSION = 'logn-merkle-v1';
+export const MERKLE_SCHEMA_VERSION_CONTRACT = 'logn-merkle-v1';
+
+/**
+ * Schema version for authentic RFC 6962 Merkle trees.
+ * @type {string}
+ */
+export const MERKLE_SCHEMA_VERSION_RFC6962 = 'logn-merkle-rfc6962-v1';
+
+/**
+ * Algorithm identifiers.
+ * @type {string}
+ */
+export const MERKLE_ALGORITHM_CONTRACT = 'HHH-CONTRACT-DUP-v1';
+export const MERKLE_ALGORITHM_RFC6962 = 'RFC-6962';
 
 /**
  * Cryptographic hash algorithm used for Merkle tree construction.
@@ -46,12 +69,24 @@ export const MERKLE_SCHEMA_VERSION = 'logn-merkle-v1';
 export const MERKLE_HASH_ALGORITHM = 'SHA-256';
 
 /**
- * The Merkle root for an empty set of leaves.
- * Per §6.5: SHA-256(0x00) = "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
- *
+ * The Merkle root for an empty set of leaves per contract §6.5:
+ * SHA-256(0x00) = "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
  * @type {string}
  */
-export const EMPTY_TREE_ROOT = computeSha256hex(LEAF_TAG);
+export const CONTRACT_EMPTY_TREE_ROOT = '6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d';
+
+/**
+ * The Merkle root for an empty set of leaves per RFC 6962 §2.1:
+ * SHA-256("") = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+ * @type {string}
+ */
+export const RFC6962_EMPTY_TREE_ROOT = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+
+/**
+ * Default empty tree root (defaults to CONTRACT_EMPTY_TREE_ROOT for backward compatibility).
+ * @type {string}
+ */
+export const EMPTY_TREE_ROOT = CONTRACT_EMPTY_TREE_ROOT;
 
 // ── Low-level helpers ─────────────────────────────────────────────────────────
 
@@ -83,7 +118,7 @@ function hexToBytes(hex) {
 
 /**
  * Compute a Merkle leaf hash.
- * Per §6.2: SHA-256(0x00 || hexToBytes(currentHash))
+ * Per §6.2 and RFC 6962: SHA-256(0x00 || hexToBytes(currentHash))
  *
  * @param {string} currentHash - 64-char hex string (Log.currentHash).
  * @returns {string} Leaf hash as lowercase hex-64.
@@ -95,7 +130,7 @@ export function leafHash(currentHash) {
 
 /**
  * Compute a Merkle internal node hash.
- * Per §6.2: SHA-256(0x01 || hexToBytes(left) || hexToBytes(right))
+ * Per §6.2 and RFC 6962: SHA-256(0x01 || hexToBytes(left) || hexToBytes(right))
  *
  * @param {string} left - 64-char hex string (left child hash).
  * @param {string} right - 64-char hex string (right child hash).
@@ -107,41 +142,104 @@ export function internalHash(left, right) {
   return computeSha256hex(Buffer.concat([NODE_TAG, leftBytes, rightBytes]));
 }
 
+/**
+ * Find the largest power of 2 strictly less than n (for n > 1).
+ * Per RFC 6962 §2.1: k < n <= 2k.
+ *
+ * @param {number} n - Number of leaves (must be > 1).
+ * @returns {number}
+ */
+export function largestPowerOf2LessThan(n) {
+  if (n <= 1) return 0;
+  let k = 1;
+  while (k * 2 < n) {
+    k *= 2;
+  }
+  return k;
+}
+
+/**
+ * Compute the authentic RFC 6962 Merkle Tree Hash (MTH) for an array of leaf hashes.
+ *
+ * @param {string[]} leafHashes - Array of leaf hashes (computed via leafHash).
+ * @returns {string} Merkle Tree Hash as lowercase hex-64.
+ */
+export function computeRfc6962Mth(leafHashes) {
+  if (!Array.isArray(leafHashes) || leafHashes.length === 0) {
+    return RFC6962_EMPTY_TREE_ROOT;
+  }
+  if (leafHashes.length === 1) {
+    return leafHashes[0];
+  }
+  const k = largestPowerOf2LessThan(leafHashes.length);
+  const leftMth = computeRfc6962Mth(leafHashes.slice(0, k));
+  const rightMth = computeRfc6962Mth(leafHashes.slice(k));
+  return internalHash(leftMth, rightMth);
+}
+
+/**
+ * Generate authentic RFC 6962 audit path steps for leaf m in leafHashes of size n.
+ *
+ * @param {string[]} leafHashes - Array of leaf hashes.
+ * @param {number} m - Target leaf index (0 <= m < n).
+ * @returns {Array<{ sibling_hash: string, position: 'left' | 'right' }>} Ordered steps from leaf to root.
+ */
+export function generateRfc6962ProofSteps(leafHashes, m) {
+  const n = leafHashes.length;
+  if (n <= 1) {
+    return [];
+  }
+  const k = largestPowerOf2LessThan(n);
+  if (m < k) {
+    const subPath = generateRfc6962ProofSteps(leafHashes.slice(0, k), m);
+    const rightSibling = computeRfc6962Mth(leafHashes.slice(k));
+    return [...subPath, { sibling_hash: rightSibling, position: 'right' }];
+  } else {
+    const subPath = generateRfc6962ProofSteps(leafHashes.slice(k), m - k);
+    const leftSibling = computeRfc6962Mth(leafHashes.slice(0, k));
+    return [...subPath, { sibling_hash: leftSibling, position: 'left' }];
+  }
+}
+
 // ── Tree construction ─────────────────────────────────────────────────────────
 
 /**
  * @typedef {object} MerkleTree
- * @property {string}     root   - Merkle root (lowercase hex-64), or EMPTY_TREE_ROOT for empty input.
- * @property {string[][]} layers - Array of tree layers from bottom (leaves) to top (root).
- *                                 layers[0] is the leaf layer; layers[last] is [root].
- *                                 Empty if input is empty.
+ * @property {string}     algorithm   - Algorithm identifier (MERKLE_ALGORITHM_CONTRACT or MERKLE_ALGORITHM_RFC6962).
+ * @property {string}     version     - Schema version string.
+ * @property {string}     root        - Merkle root (lowercase hex-64).
+ * @property {string[][]} layers      - Array of tree layers from bottom to top.
+ * @property {string[]}   [leaves]    - Array of leaf hashes (present for RFC-6962).
+ * @property {string[]}   eventHashes - Ordered array of original event hashes.
+ * @property {number}     tree_size   - Number of leaves in tree.
  */
 
 /**
  * Build a Merkle tree from an ordered array of authoritative log hashes.
  *
- * The input hashes are Log.currentHash values ordered by ascending sequence_number.
- * They are NOT re-sorted here — the caller is responsible for providing them
- * in the correct order. Silently sorting would break the proof of sequence integrity.
- *
- * Algorithm (§6.3):
- *   1. Compute leaf hash for each input hash.
- *   2. Repeatedly pair and hash adjacent nodes to build each layer.
- *   3. If a layer has an odd number of nodes, duplicate the last node (§6.4).
- *   4. Continue until one node remains (the root).
+ * Supports two algorithms via options.algorithm:
+ *   - MERKLE_ALGORITHM_CONTRACT ('HHH-CONTRACT-DUP-v1') [Default]:
+ *       Standard layer reduction tree with odd-node duplication per contract §6.
+ *   - MERKLE_ALGORITHM_RFC6962 ('RFC-6962'):
+ *       Authentic RFC 6962 Certificate Transparency tree with split at 2^(floor(log2(n-1))).
  *
  * @param {string[]} currentHashes - Ordered array of hex-64 Log.currentHash values.
- * @returns {MerkleTree} The built Merkle tree with root and all layers.
- * @throws {TypeError} If any element is not a valid 64-char hex string.
+ * @param {object} [options={}] - Optional configuration.
+ * @param {string} [options.algorithm=MERKLE_ALGORITHM_CONTRACT] - Algorithm identifier.
+ * @returns {MerkleTree} The built Merkle tree with root and metadata.
+ * @throws {TypeError} If any element is not a valid 64-char hex string or algorithm is invalid.
  */
-export function buildMerkleTree(currentHashes) {
+export function buildMerkleTree(currentHashes, options = {}) {
   if (!Array.isArray(currentHashes)) {
     throw new TypeError('buildMerkleTree: input must be an array');
   }
 
-  // Empty tree — per §6.5
-  if (currentHashes.length === 0) {
-    return { root: EMPTY_TREE_ROOT, layers: [], eventHashes: [], tree_size: 0 };
+  const algorithm = (options && options.algorithm)
+    ? options.algorithm
+    : MERKLE_ALGORITHM_CONTRACT;
+
+  if (algorithm !== MERKLE_ALGORITHM_CONTRACT && algorithm !== MERKLE_ALGORITHM_RFC6962) {
+    throw new TypeError(`buildMerkleTree: unknown algorithm "${algorithm}"`);
   }
 
   // Validate all inputs before computing anything
@@ -153,12 +251,47 @@ export function buildMerkleTree(currentHashes) {
     }
   }
 
-  // Step 1: Compute leaf layer
+  // Empty tree handling
+  if (currentHashes.length === 0) {
+    const root = (algorithm === MERKLE_ALGORITHM_RFC6962)
+      ? RFC6962_EMPTY_TREE_ROOT
+      : CONTRACT_EMPTY_TREE_ROOT;
+    const version = (algorithm === MERKLE_ALGORITHM_RFC6962)
+      ? MERKLE_SCHEMA_VERSION_RFC6962
+      : MERKLE_SCHEMA_VERSION_CONTRACT;
+
+    return {
+      algorithm,
+      version,
+      root,
+      layers: [],
+      leaves: [],
+      eventHashes: [],
+      tree_size: 0,
+    };
+  }
+
+  // Step 1: Compute leaf hashes
   const leaves = currentHashes.map((h) => leafHash(h));
+
+  // Branch for authentic RFC 6962
+  if (algorithm === MERKLE_ALGORITHM_RFC6962) {
+    const root = computeRfc6962Mth(leaves);
+    return {
+      algorithm: MERKLE_ALGORITHM_RFC6962,
+      version: MERKLE_SCHEMA_VERSION_RFC6962,
+      root,
+      leaves,
+      layers: [[...leaves], [root]],
+      eventHashes: currentHashes.slice(),
+      tree_size: currentHashes.length,
+    };
+  }
+
+  // Branch for HHH-CONTRACT-DUP-v1 (default contract specification)
   const layers = [leaves];
   let currentLayer = leaves;
 
-  // Step 2–4: Build tree upward
   while (currentLayer.length > 1) {
     const nextLayer = [];
     for (let i = 0; i < currentLayer.length; i += 2) {
@@ -172,8 +305,11 @@ export function buildMerkleTree(currentHashes) {
   }
 
   return {
+    algorithm: MERKLE_ALGORITHM_CONTRACT,
+    version: MERKLE_SCHEMA_VERSION_CONTRACT,
     root: currentLayer[0],
     layers,
+    leaves,
     eventHashes: currentHashes.slice(),
     tree_size: currentHashes.length,
   };
@@ -200,41 +336,66 @@ export function getMerkleRoot(tree) {
 
 /**
  * @typedef {object} MerkleProof
- * @property {number}      leaf_index  - Zero-based index of the leaf in the original array.
- * @property {string}      leaf_hash   - The computed leaf hash (SHA-256(0x00 || currentHash bytes)).
- * @property {ProofStep[]} proof       - Ordered array of proof steps from leaf to root.
- * @property {string}      root        - The Merkle root this proof is relative to.
+ * @property {string}      version             - Schema version string.
+ * @property {string}      tree_schema_version - Standardized tree schema version.
+ * @property {string}      algorithm           - Algorithm used to construct the tree.
+ * @property {string}      hash_algorithm      - Cryptographic hash algorithm ('SHA-256').
+ * @property {number}      tree_size           - Total number of leaves in tree.
+ * @property {number}      leaf_index          - Zero-based index of the leaf in original order.
+ * @property {string}      event_hash          - Original Log.currentHash for this leaf.
+ * @property {string}      leaf_hash           - The computed leaf hash (SHA-256(0x00 || currentHash)).
+ * @property {ProofStep[]} proof               - Ordered array of proof steps from leaf to root.
+ * @property {string}      root                - The Merkle root this proof authenticates against.
  */
 
 /**
  * Generate a Merkle inclusion proof for the leaf at the given index.
  *
- * The proof allows any verifier to independently recompute the Merkle root
- * starting from just the leaf's currentHash, without needing the full tree.
- *
- * Proof format (§6.6):
- *   Each step: { sibling_hash, position }
- *   - position "right": sibling is to the right → current = internalHash(current, sibling)
- *   - position "left":  sibling is to the left  → current = internalHash(sibling, current)
+ * Supports both HHH-CONTRACT-DUP-v1 and RFC-6962 trees.
  *
  * @param {MerkleTree} tree - A tree returned by buildMerkleTree().
  * @param {number} leafIndex - Zero-based index of the target leaf.
- * @returns {MerkleProof} The inclusion proof.
+ * @returns {MerkleProof} The inclusion proof bundle.
  * @throws {RangeError} If leafIndex is out of bounds.
- * @throws {Error} If the tree is empty (no layers).
+ * @throws {Error} If the tree is empty.
  */
 export function generateMerkleProof(tree, leafIndex) {
-  if (!tree || tree.layers.length === 0) {
+  if (!tree || tree.tree_size === 0 || (!tree.layers?.length && !tree.leaves?.length)) {
     throw new Error('generateMerkleProof: cannot generate proof for empty tree');
   }
 
-  const leafLayer = tree.layers[0];
-  if (!Number.isInteger(leafIndex) || leafIndex < 0 || leafIndex >= leafLayer.length) {
+  const leafCount = tree.tree_size ?? (tree.layers ? tree.layers[0].length : tree.leaves.length);
+  if (!Number.isInteger(leafIndex) || leafIndex < 0 || leafIndex >= leafCount) {
     throw new RangeError(
-      `generateMerkleProof: leafIndex ${leafIndex} is out of bounds (tree has ${leafLayer.length} leaves)`
+      `generateMerkleProof: leafIndex ${leafIndex} is out of bounds (tree has ${leafCount} leaves)`
     );
   }
 
+  const eventHash = (tree.eventHashes && tree.eventHashes[leafIndex])
+    ? tree.eventHashes[leafIndex]
+    : null;
+  const treeSize = leafCount;
+
+  // RFC-6962 proof generation
+  if (tree.algorithm === MERKLE_ALGORITHM_RFC6962) {
+    const leaves = tree.leaves || (tree.layers && tree.layers[0]);
+    const proofSteps = generateRfc6962ProofSteps(leaves, leafIndex);
+    return {
+      version: MERKLE_SCHEMA_VERSION_RFC6962,
+      tree_schema_version: MERKLE_SCHEMA_VERSION_RFC6962,
+      algorithm: MERKLE_ALGORITHM_RFC6962,
+      hash_algorithm: MERKLE_HASH_ALGORITHM,
+      tree_size: treeSize,
+      leaf_index: leafIndex,
+      event_hash: eventHash,
+      leaf_hash: leaves[leafIndex],
+      proof: proofSteps,
+      root: tree.root,
+    };
+  }
+
+  // Contract duplicated-node proof generation
+  const leafLayer = tree.layers[0];
   const proof = [];
   let currentIndex = leafIndex;
 
@@ -259,18 +420,13 @@ export function generateMerkleProof(tree, leafIndex) {
       });
     }
 
-    // Move up to parent index
     currentIndex = Math.floor(currentIndex / 2);
   }
 
-  const eventHash = (tree.eventHashes && tree.eventHashes[leafIndex])
-    ? tree.eventHashes[leafIndex]
-    : null;
-  const treeSize = tree.tree_size ?? leafLayer.length;
-
   return {
-    version: MERKLE_SCHEMA_VERSION,
-    tree_schema_version: MERKLE_SCHEMA_VERSION,
+    version: MERKLE_SCHEMA_VERSION_CONTRACT,
+    tree_schema_version: MERKLE_SCHEMA_VERSION_CONTRACT,
+    algorithm: MERKLE_ALGORITHM_CONTRACT,
     hash_algorithm: MERKLE_HASH_ALGORITHM,
     tree_size: treeSize,
     leaf_index: leafIndex,
@@ -286,19 +442,41 @@ export function generateMerkleProof(tree, leafIndex) {
  *
  * Verifies that the proof bundle correctly authenticates the event hash
  * against the tree root, checking schema version, hash algorithm,
- * leaf index bounds, and proof steps.
+ * leaf index bounds, and proof steps. Supports both HHH-CONTRACT-DUP-v1
+ * and RFC-6962 schemas.
  *
  * @param {object} proofBundle - Proof object returned by generateMerkleProof().
  * @param {string} [expectedRoot] - Optional expected Merkle root to match against.
- * @returns {{ valid: boolean, root?: string, leaf_index?: number, error?: string, reason?: string }}
+ * @returns {{ valid: boolean, root?: string, leaf_index?: number, tree_size?: number, algorithm?: string, error?: string, reason?: string }}
  */
 export function verifyInclusionProofBundle(proofBundle, expectedRoot = null) {
   if (!proofBundle || typeof proofBundle !== 'object') {
     return { valid: false, error: 'INVALID_PROOF_BUNDLE', reason: 'Proof bundle must be an object' };
   }
-  if (proofBundle.tree_schema_version && proofBundle.tree_schema_version !== MERKLE_SCHEMA_VERSION) {
-    return { valid: false, error: 'UNSUPPORTED_SCHEMA_VERSION', reason: `Expected ${MERKLE_SCHEMA_VERSION}` };
+
+  const validSchemas = [
+    MERKLE_SCHEMA_VERSION_CONTRACT,
+    'logn-merkle-dup-v1',
+    MERKLE_SCHEMA_VERSION_RFC6962,
+  ];
+  if (proofBundle.tree_schema_version && !validSchemas.includes(proofBundle.tree_schema_version)) {
+    return {
+      valid: false,
+      error: 'UNSUPPORTED_SCHEMA_VERSION',
+      reason: `Schema "${proofBundle.tree_schema_version}" not supported (expected one of: ${validSchemas.join(', ')})`,
+    };
   }
+
+  if (proofBundle.algorithm &&
+      proofBundle.algorithm !== MERKLE_ALGORITHM_CONTRACT &&
+      proofBundle.algorithm !== MERKLE_ALGORITHM_RFC6962) {
+    return {
+      valid: false,
+      error: 'UNSUPPORTED_ALGORITHM',
+      reason: `Algorithm "${proofBundle.algorithm}" not supported`,
+    };
+  }
+
   if (proofBundle.hash_algorithm && proofBundle.hash_algorithm !== MERKLE_HASH_ALGORITHM) {
     return { valid: false, error: 'UNSUPPORTED_HASH_ALGORITHM', reason: `Expected ${MERKLE_HASH_ALGORITHM}` };
   }
@@ -335,6 +513,7 @@ export function verifyInclusionProofBundle(proofBundle, expectedRoot = null) {
       root: targetRoot,
       leaf_index: proofBundle.leaf_index,
       tree_size: proofBundle.tree_size,
+      algorithm: proofBundle.algorithm || MERKLE_ALGORITHM_CONTRACT,
     };
   } catch (err) {
     return { valid: false, error: 'VERIFICATION_ERROR', reason: err.message };
@@ -348,7 +527,7 @@ export function verifyInclusionProofBundle(proofBundle, expectedRoot = null) {
  * Merkle root and compares it to the expected root. Does NOT touch the original
  * tree object — it is completely independent.
  *
- * Verification algorithm (§6.6 pseudocode):
+ * Verification algorithm:
  *   current = leafHash(leaf_currentHash)
  *   for step in proof:
  *     if step.position == "left":
@@ -404,8 +583,17 @@ export function verifyMerkleProof(currentHash, proof, expectedRoot) {
 
 export default {
   EMPTY_TREE_ROOT,
+  CONTRACT_EMPTY_TREE_ROOT,
+  RFC6962_EMPTY_TREE_ROOT,
   MERKLE_SCHEMA_VERSION,
+  MERKLE_SCHEMA_VERSION_CONTRACT,
+  MERKLE_SCHEMA_VERSION_RFC6962,
+  MERKLE_ALGORITHM_CONTRACT,
+  MERKLE_ALGORITHM_RFC6962,
   MERKLE_HASH_ALGORITHM,
+  largestPowerOf2LessThan,
+  computeRfc6962Mth,
+  generateRfc6962ProofSteps,
   leafHash,
   internalHash,
   buildMerkleTree,
