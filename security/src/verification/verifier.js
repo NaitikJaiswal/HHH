@@ -36,14 +36,15 @@ export { VerificationStatus };
  */
 
 /**
- * Verify a checkpoint independently against a key manager.
+ * Verify a checkpoint independently against a key manager, MPK, or FSS state manager.
  *
  * @param {object} checkpoint
- * @param {import('../keys/keyManager.js').KeyManager} [keyManager]
+ * @param {import('../keys/keyManager.js').KeyManager|string} [keyManagerOrMpk]
+ * @param {object} [options]
  * @returns {import('../checkpoints/checkpointService.js').VerificationResult}
  */
-export function verifySignedCheckpoint(checkpoint, keyManager) {
-  return verifyCheckpoint(checkpoint, keyManager);
+export function verifySignedCheckpoint(checkpoint, keyManagerOrMpk, options = {}) {
+  return verifyCheckpoint(checkpoint, keyManagerOrMpk, options);
 }
 
 /**
@@ -72,7 +73,7 @@ export function verifyInclusionProof(checkpoint, currentHash, proof) {
  * @param {import('../keys/keyManager.js').KeyManager} [keyManager] - Key manager for signature verification.
  * @returns {ComprehensiveVerificationResult}
  */
-export function verifyEventsAgainstCheckpoint(checkpoint, events, keyManager) {
+export function verifyEventsAgainstCheckpoint(checkpoint, events, keyManagerOrMpk, options = {}) {
   const failures = [];
   const details = {
     chain: null,
@@ -81,7 +82,7 @@ export function verifyEventsAgainstCheckpoint(checkpoint, events, keyManager) {
   };
 
   // 1. Verify checkpoint structure and signature first
-  const cpResult = verifyCheckpoint(checkpoint, keyManager);
+  const cpResult = verifyCheckpoint(checkpoint, keyManagerOrMpk, options);
   details.checkpoint = cpResult;
   if (!cpResult.valid) {
     failures.push(...cpResult.failures);

@@ -37,6 +37,8 @@ import { buildMerkleTree, getMerkleRoot, generateMerkleProof, verifyMerkleProof 
 import { canonicalJson } from '../crypto/canonicalJson.js';
 import { generateUuidV4, publicKeyFromHex } from '../keys/keyManager.js';
 import { BlockchainError, BlockchainErrorCode } from '../blockchain/errors.js';
+import { verifyFssSignature, signFssEpoch } from '../crypto/fssSigner.js';
+import { FssStateManager } from '../keys/fssStateManager.js';
 
 // ── Schema constants ──────────────────────────────────────────────────────────
 
@@ -49,10 +51,22 @@ import { BlockchainError, BlockchainErrorCode } from '../blockchain/errors.js';
 export const CHECKPOINT_SCHEMA_VERSION = 'logn-checkpoint-v1';
 
 /**
+ * Forward-secure checkpoint schema version string.
+ * @type {string}
+ */
+export const CHECKPOINT_FSS_SCHEMA_VERSION = 'logn-checkpoint-fss-v1';
+
+/**
  * Signature algorithm identifier stored in checkpoint documents.
  * @type {string}
  */
 export const SIGNATURE_ALGORITHM = 'Ed25519';
+
+/**
+ * Forward-secure signature algorithm identifier stored in FSS checkpoints.
+ * @type {string}
+ */
+export const SIGNATURE_ALGORITHM_FSS = 'Ed25519-MKT-FSS';
 
 /**
  * Documents what was signed — always this exact string.
@@ -74,6 +88,7 @@ export const VerificationStatus = Object.freeze({
   INVALID_PROOF:       'INVALID_PROOF',
   UNKNOWN_SIGNING_KEY: 'UNKNOWN_SIGNING_KEY',
   INVALID_CHECKPOINT:  'INVALID_CHECKPOINT',
+  KEY_REVOKED:         'KEY_REVOKED',
   VERIFICATION_ERROR:  'VERIFICATION_ERROR',
 });
 
@@ -92,10 +107,19 @@ export function buildSigningPayload(checkpoint) {
   if (!checkpoint || typeof checkpoint !== 'object') {
     throw new TypeError('buildSigningPayload: checkpoint must be an object');
   }
-  // Build a copy without "signature" and "blockchain"
+  // Build a copy without signature, proofs, and blockchain fields
   const payload = {};
   for (const [key, value] of Object.entries(checkpoint)) {
-    if (key === 'signature' || key === 'blockchain') continue;
+    if (
+      key === 'signature' ||
+      key === 'fss_signature' ||
+      key === 'fss_bundle' ||
+      key === 'epoch_public_key' ||
+      key === 'fss_auth_path' ||
+      key === 'blockchain'
+    ) {
+      continue;
+    }
     payload[key] = value;
   }
   return canonicalJson(payload);
@@ -131,24 +155,108 @@ export function buildSigningPayload(checkpoint) {
  */
 
 /**
+ * Generate a forward-secure signed checkpoint for a window of log events.
+ *
+ * Implements Stage 4.2: FSS-signed checkpoints binding:
+ *   - Checkpoint ID, schema_version ('logn-checkpoint-fss-v1')
+ *   - Merkle root, start_sequence, end_sequence, event_count, timestamp
+ *   - fss_epoch, epoch_public_key, fss_auth_path, mpk
+ *
+ * @param {CheckpointInput} input - Window parameters and leaf hashes.
+ * @param {import('../keys/fssStateManager.js').FssStateManager|object} fssSignerOrManager - FSS State Manager or active FSS state.
+ * @returns {object} The signed FSS checkpoint document.
+ */
+export function createFssCheckpoint(input, fssSignerOrManager) {
+  if (!input || typeof input !== 'object') {
+    throw new TypeError('createFssCheckpoint: input must be an object');
+  }
+  const { source_id, start_sequence, end_sequence, leaf_hashes } = input;
+
+  if (!source_id || typeof source_id !== 'string') {
+    throw new TypeError('createFssCheckpoint: source_id must be a non-empty string');
+  }
+  if (!Number.isInteger(start_sequence) || start_sequence < 1) {
+    throw new TypeError('createFssCheckpoint: start_sequence must be a positive integer');
+  }
+  if (!Number.isInteger(end_sequence) || end_sequence < start_sequence) {
+    throw new TypeError('createFssCheckpoint: end_sequence must be >= start_sequence');
+  }
+  if (!Array.isArray(leaf_hashes) || leaf_hashes.length === 0) {
+    throw new TypeError('createFssCheckpoint: leaf_hashes must be a non-empty array');
+  }
+
+  const expectedCount = end_sequence - start_sequence + 1;
+  if (leaf_hashes.length !== expectedCount) {
+    throw new RangeError(
+      `createFssCheckpoint: leaf_hashes has ${leaf_hashes.length} entries but sequence range [${start_sequence}, ${end_sequence}] requires ${expectedCount}`
+    );
+  }
+
+  if (!fssSignerOrManager) {
+    throw new Error('createFssCheckpoint: forward-secure signer or manager must be provided');
+  }
+
+  // 1. Build Merkle tree over leaf hashes
+  const tree = buildMerkleTree(leaf_hashes);
+  const merkleRoot = getMerkleRoot(tree);
+
+  // 2. Build UTC timestamp
+  const timestamp = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+
+  // Resolve active FSS state metadata
+  const state = fssSignerOrManager.activeState || fssSignerOrManager;
+  const epoch = state.epoch ?? 0;
+  const mpk = state.mpk;
+
+  // 3. Assemble unsigned checkpoint
+  const checkpoint = {
+    schema_version:      CHECKPOINT_FSS_SCHEMA_VERSION,
+    checkpoint_id:       input.checkpoint_id || generateUuidV4(),
+    source_id,
+    start_sequence,
+    end_sequence,
+    event_count:         expectedCount,
+    merkle_root:         merkleRoot,
+    merkle_leaf_hashes:  leaf_hashes.slice(),
+    timestamp,
+    fss_epoch:           epoch,
+    mpk,
+    signature_algorithm: SIGNATURE_ALGORITHM_FSS,
+    signature_input:     CHECKPOINT_FSS_SCHEMA_VERSION,
+  };
+
+  // 4. Sign canonical payload
+  const payloadStr = buildSigningPayload(checkpoint);
+  let sigBundle;
+  if (typeof fssSignerOrManager.sign === 'function') {
+    sigBundle = fssSignerOrManager.sign(payloadStr);
+  } else {
+    sigBundle = signFssEpoch(state, payloadStr);
+  }
+
+  checkpoint.epoch_public_key = sigBundle.publicKey;
+  checkpoint.signature        = sigBundle.signature;
+  checkpoint.fss_signature    = sigBundle.signature;
+  checkpoint.fss_auth_path    = sigBundle.authPath;
+  checkpoint.fss_bundle       = sigBundle;
+  checkpoint.blockchain       = null;
+
+  return checkpoint;
+}
+
+/**
  * Generate a signed checkpoint for a window of log events.
+ * Supports both forward-secure signing (FssStateManager) and legacy KeyManager.
  *
- * Steps:
- *   1. Validate inputs (source_id, sequences, leaf_hashes count)
- *   2. Build Merkle tree over leaf_hashes
- *   3. Compute Merkle root
- *   4. Build the checkpoint document (sans signature)
- *   5. Serialise signing payload canonically
- *   6. Sign with Ed25519 private key
- *   7. Attach signature and return
- *
- * @param {CheckpointInput} input    - Window parameters and leaf hashes.
- * @param {import('../keys/keyManager.js').KeyManager} keyManager - Loaded KeyManager.
- * @returns {SignedCheckpoint} The complete signed checkpoint document.
- * @throws {TypeError} If inputs are invalid.
- * @throws {RangeError} If event_count does not match sequence range.
+ * @param {CheckpointInput} input - Window parameters and leaf hashes.
+ * @param {import('../keys/keyManager.js').KeyManager|import('../keys/fssStateManager.js').FssStateManager} keyManager - Loaded KeyManager or FssStateManager.
+ * @returns {SignedCheckpoint|object} The complete signed checkpoint document.
  */
 export function createCheckpoint(input, keyManager) {
+  if (keyManager && (keyManager instanceof FssStateManager || keyManager.activeState || keyManager.isFss)) {
+    return createFssCheckpoint(input, keyManager);
+  }
+
   // ── Input validation ────────────────────────────────────────────────────────
   if (!input || typeof input !== 'object') {
     throw new TypeError('createCheckpoint: input must be an object');
@@ -244,7 +352,7 @@ export function createCheckpoint(input, keyManager) {
  * @param {import('../keys/keyManager.js').KeyManager} [keyManager] - For public key lookup.
  * @returns {VerificationResult}
  */
-export function verifyCheckpoint(checkpoint, keyManager) {
+export function verifyCheckpoint(checkpoint, keyManagerOrMpk, options = {}) {
   const failures = [];
   const checks   = {
     structure:      false,
@@ -254,12 +362,137 @@ export function verifyCheckpoint(checkpoint, keyManager) {
     merkle_root:    false,
     signing_key:    false,
     signature:      false,
+    fss_auth_path:  false,
+    revocation:     false,
   };
 
   if (!checkpoint || typeof checkpoint !== 'object') {
     failures.push('Checkpoint must be a non-null object');
     return _result(VerificationStatus.INVALID_CHECKPOINT, failures, checks);
   }
+
+  // ── Handle Forward-Secure Checkpoint (logn-checkpoint-fss-v1) ────────────────
+  if (checkpoint.schema_version === CHECKPOINT_FSS_SCHEMA_VERSION) {
+    const required = [
+      'schema_version', 'checkpoint_id', 'source_id',
+      'start_sequence', 'end_sequence',  'event_count',
+      'merkle_root',    'merkle_leaf_hashes', 'timestamp',
+      'fss_epoch',      'epoch_public_key',   'mpk',
+      'signature',      'signature_algorithm', 'signature_input',
+    ];
+    const missing = required.filter((f) => checkpoint[f] === undefined || checkpoint[f] === null);
+    if (missing.length > 0) {
+      failures.push(`Missing required fields: ${missing.join(', ')}`);
+      return _result(VerificationStatus.INVALID_CHECKPOINT, failures, checks);
+    }
+    checks.structure = true;
+    checks.schema_version = true;
+
+    // Check event count & bounds
+    const expectedCount = checkpoint.end_sequence - checkpoint.start_sequence + 1;
+    if (!Number.isInteger(checkpoint.start_sequence) ||
+        !Number.isInteger(checkpoint.end_sequence) ||
+        checkpoint.start_sequence < 1 ||
+        checkpoint.end_sequence < checkpoint.start_sequence ||
+        checkpoint.event_count !== expectedCount) {
+      failures.push(
+        `event_count ${checkpoint.event_count} inconsistent with sequence range [${checkpoint.start_sequence}, ${checkpoint.end_sequence}] (expected ${expectedCount})`
+      );
+      return _result(VerificationStatus.INVALID_CHECKPOINT, failures, checks);
+    }
+    checks.event_count = true;
+
+    if (!Array.isArray(checkpoint.merkle_leaf_hashes) ||
+        checkpoint.merkle_leaf_hashes.length !== checkpoint.event_count) {
+      failures.push(
+        `merkle_leaf_hashes length ${checkpoint.merkle_leaf_hashes?.length} ≠ event_count ${checkpoint.event_count}`
+      );
+      return _result(VerificationStatus.INVALID_CHECKPOINT, failures, checks);
+    }
+    checks.leaf_count = true;
+
+    // Check Merkle root over leaves
+    try {
+      const rebuilt = buildMerkleTree(checkpoint.merkle_leaf_hashes);
+      const computedRoot = getMerkleRoot(rebuilt);
+      if (computedRoot !== checkpoint.merkle_root) {
+        failures.push(`Merkle root mismatch: computed "${computedRoot}" ≠ stored "${checkpoint.merkle_root}"`);
+        checks.merkle_root = false;
+        return _result(VerificationStatus.MERKLE_MISMATCH, failures, checks);
+      }
+      checks.merkle_root = true;
+    } catch (err) {
+      failures.push(`Merkle root computation failed: ${err.message}`);
+      checks.merkle_root = false;
+      return _result(VerificationStatus.MERKLE_MISMATCH, failures, checks);
+    }
+
+    // Check Revocation boundary
+    const revocationNotice = options.revocationNotice || (keyManagerOrMpk && keyManagerOrMpk.revocationNotice);
+    if (revocationNotice) {
+      if (Number.isInteger(checkpoint.fss_epoch) && checkpoint.fss_epoch >= revocationNotice.compromiseEpoch) {
+        failures.push(
+          `FSS epoch ${checkpoint.fss_epoch} revoked: compromise declared at epoch ${revocationNotice.compromiseEpoch}`
+        );
+        checks.revocation = false;
+        return _result(VerificationStatus.KEY_REVOKED, failures, checks);
+      }
+    }
+    checks.revocation = true;
+
+    // Resolve trusted Master Public Key (MPK)
+    let expectedMpk = checkpoint.mpk;
+    if (typeof keyManagerOrMpk === 'string' && /^[0-9a-fA-F]{64}$/.test(keyManagerOrMpk)) {
+      expectedMpk = keyManagerOrMpk;
+      if (expectedMpk.toLowerCase() !== checkpoint.mpk.toLowerCase()) {
+        failures.push(`Checkpoint MPK ${checkpoint.mpk} does not match expected trusted MPK ${expectedMpk}`);
+        checks.signing_key = false;
+        return _result(VerificationStatus.UNKNOWN_SIGNING_KEY, failures, checks);
+      }
+    } else if (keyManagerOrMpk && keyManagerOrMpk.mpk) {
+      expectedMpk = keyManagerOrMpk.mpk;
+      if (expectedMpk.toLowerCase() !== checkpoint.mpk.toLowerCase()) {
+        failures.push(`Checkpoint MPK ${checkpoint.mpk} does not match manager MPK ${expectedMpk}`);
+        checks.signing_key = false;
+        return _result(VerificationStatus.UNKNOWN_SIGNING_KEY, failures, checks);
+      }
+    }
+    checks.signing_key = true;
+
+    // Verify FSS signature on canonical payload
+    try {
+      const payloadStr = buildSigningPayload(checkpoint);
+      const bundle = {
+        version: checkpoint.fss_bundle?.version || 'HHH-MKT-FSS-v1',
+        epoch: checkpoint.fss_epoch,
+        publicKey: checkpoint.epoch_public_key,
+        signature: checkpoint.signature || checkpoint.fss_signature,
+        authPath: checkpoint.fss_auth_path,
+        mpk: checkpoint.mpk,
+      };
+
+      const fssRes = verifyFssSignature(expectedMpk, payloadStr, bundle);
+      if (!fssRes.valid) {
+        failures.push(`FSS signature verification failed: ${fssRes.error} (${fssRes.reason})`);
+        if (fssRes.error === 'MERKLE_PATH_MISMATCH') {
+          checks.fss_auth_path = false;
+          return _result(VerificationStatus.MERKLE_MISMATCH, failures, checks);
+        }
+        checks.signature = false;
+        return _result(VerificationStatus.INVALID_SIGNATURE, failures, checks);
+      }
+      checks.signature = true;
+      checks.fss_auth_path = true;
+    } catch (err) {
+      failures.push(`FSS signature check threw: ${err.message}`);
+      return _result(VerificationStatus.VERIFICATION_ERROR, failures, checks);
+    }
+
+    return _result(VerificationStatus.VERIFIED, [], checks);
+  }
+
+  // ── Handle Legacy Checkpoint (logn-checkpoint-v1) ───────────────────────────
+  const keyManager = keyManagerOrMpk;
 
   // ── Check 1: Structure ──────────────────────────────────────────────────────
   const required = [
@@ -558,11 +791,14 @@ export async function anchorSignedCheckpoint(checkpoint, blockchainService, keyM
 
 export default {
   CHECKPOINT_SCHEMA_VERSION,
+  CHECKPOINT_FSS_SCHEMA_VERSION,
   SIGNATURE_ALGORITHM,
+  SIGNATURE_ALGORITHM_FSS,
   SIGNATURE_INPUT_LABEL,
   VerificationStatus,
   buildSigningPayload,
   createCheckpoint,
+  createFssCheckpoint,
   verifyCheckpoint,
   verifyCheckpointProof,
   anchorSignedCheckpoint,

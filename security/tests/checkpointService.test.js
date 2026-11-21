@@ -20,17 +20,30 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   createCheckpoint,
+  createFssCheckpoint,
   verifyCheckpoint,
   verifyCheckpointProof,
   VerificationStatus,
   CHECKPOINT_SCHEMA_VERSION,
+  CHECKPOINT_FSS_SCHEMA_VERSION,
+  SIGNATURE_ALGORITHM_FSS,
 } from '../src/checkpoints/checkpointService.js';
 import { KeyManager } from '../src/keys/keyManager.js';
+import { FssStateManager } from '../src/keys/fssStateManager.js';
+import { generateFssMasterState } from '../src/crypto/fssSigner.js';
 import { generateMerkleProof, buildMerkleTree } from '../src/merkle/merkleTree.js';
 import { sha256hex } from '../src/crypto/hashing.js';
 
 function createTempKeysDir() {
   return mkdtempSync(join(tmpdir(), 'securelog-checkpoint-test-'));
+}
+
+function createTestFssSetup(dir, maxEpochs = 8) {
+  const { state, publicTree } = generateFssMasterState({ maxEpochs });
+  const statePath = join(dir, 'fss_state.json');
+  const fss = new FssStateManager({ statePath });
+  fss.initState(state, true);
+  return { fss, publicTree };
 }
 
 function makeLeafHashes(n) {
@@ -257,6 +270,218 @@ test('8. Merkle inclusion proof verification against checkpoint', async () => {
     const resWrong = verifyCheckpointProof(checkpoint, sha256hex('wrong-leaf'), proof.proof);
     assert.equal(resWrong.status, VerificationStatus.INVALID_PROOF);
     assert.equal(resWrong.valid, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('9. Generate and verify a valid FSS-signed checkpoint', async () => {
+  const dir = createTempKeysDir();
+  try {
+    const { fss } = createTestFssSetup(dir, 8);
+    const leafHashes = makeLeafHashes(5);
+
+    // Test both createFssCheckpoint and createCheckpoint auto-delegation
+    const checkpoint = createFssCheckpoint(
+      {
+        source_id: 'server-fss',
+        start_sequence: 1,
+        end_sequence: 5,
+        leaf_hashes: leafHashes,
+      },
+      fss
+    );
+
+    assert.equal(checkpoint.schema_version, CHECKPOINT_FSS_SCHEMA_VERSION);
+    assert.equal(checkpoint.signature_algorithm, SIGNATURE_ALGORITHM_FSS);
+    assert.equal(checkpoint.source_id, 'server-fss');
+    assert.equal(checkpoint.start_sequence, 1);
+    assert.equal(checkpoint.end_sequence, 5);
+    assert.equal(checkpoint.event_count, 5);
+    assert.equal(checkpoint.fss_epoch, 0);
+    assert.equal(checkpoint.mpk, fss.mpk);
+    assert.match(checkpoint.epoch_public_key, /^[0-9a-f]{64}$/i);
+    assert.match(checkpoint.signature, /^[0-9a-f]{128}$/i);
+    assert.ok(Array.isArray(checkpoint.fss_auth_path));
+
+    // Verify using FssStateManager
+    const resMgr = verifyCheckpoint(checkpoint, fss);
+    assert.equal(resMgr.valid, true);
+    assert.equal(resMgr.status, VerificationStatus.VERIFIED);
+    assert.equal(resMgr.checks.fss_auth_path, true);
+
+    // Verify using raw MPK string
+    const resMpk = verifyCheckpoint(checkpoint, fss.mpk);
+    assert.equal(resMpk.valid, true);
+    assert.equal(resMpk.status, VerificationStatus.VERIFIED);
+
+    // Also test createCheckpoint with FssStateManager
+    const checkpointAuto = createCheckpoint(
+      {
+        source_id: 'server-fss',
+        start_sequence: 6,
+        end_sequence: 10,
+        leaf_hashes: leafHashes,
+      },
+      fss
+    );
+    assert.equal(checkpointAuto.schema_version, CHECKPOINT_FSS_SCHEMA_VERSION);
+    assert.equal(verifyCheckpoint(checkpointAuto, fss).valid, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('10. Reject FSS checkpoint with modified Merkle root or sequence bounds', async () => {
+  const dir = createTempKeysDir();
+  try {
+    const { fss } = createTestFssSetup(dir, 8);
+    const leafHashes = makeLeafHashes(3);
+
+    const checkpoint = createFssCheckpoint(
+      {
+        source_id: 'server-fss',
+        start_sequence: 1,
+        end_sequence: 3,
+        leaf_hashes: leafHashes,
+      },
+      fss
+    );
+
+    // Tamper with Merkle root
+    const tamperedRoot = { ...checkpoint, merkle_root: sha256hex('tampered-fss-root') };
+    const resRoot = verifyCheckpoint(tamperedRoot, fss.mpk);
+    assert.equal(resRoot.valid, false);
+    assert.equal(resRoot.status, VerificationStatus.MERKLE_MISMATCH);
+
+    // Tamper with start_sequence
+    const tamperedSeq = { ...checkpoint, start_sequence: 2 };
+    const resSeq = verifyCheckpoint(tamperedSeq, fss.mpk);
+    assert.equal(resSeq.valid, false);
+    assert.equal(resSeq.status, VerificationStatus.INVALID_CHECKPOINT);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('11. Reject FSS checkpoint with forged signature or tampered auth path', async () => {
+  const dir = createTempKeysDir();
+  try {
+    const { fss } = createTestFssSetup(dir, 8);
+    const leafHashes = makeLeafHashes(2);
+
+    const checkpoint = createFssCheckpoint(
+      {
+        source_id: 'server-fss',
+        start_sequence: 1,
+        end_sequence: 2,
+        leaf_hashes: leafHashes,
+      },
+      fss
+    );
+
+    // Corrupt signature
+    const badSig = {
+      ...checkpoint,
+      signature: (checkpoint.signature[0] === '0' ? '1' : '0') + checkpoint.signature.slice(1),
+      fss_signature: (checkpoint.signature[0] === '0' ? '1' : '0') + checkpoint.signature.slice(1),
+    };
+    const resSig = verifyCheckpoint(badSig, fss.mpk);
+    assert.equal(resSig.valid, false);
+    assert.equal(resSig.status, VerificationStatus.INVALID_SIGNATURE);
+
+    // Corrupt auth path
+    const badAuth = {
+      ...checkpoint,
+      fss_auth_path: checkpoint.fss_auth_path.map((node) => ({
+        ...node,
+        sibling_hash: sha256hex('corrupt-auth-hash'),
+      })),
+    };
+    const resAuth = verifyCheckpoint(badAuth, fss.mpk);
+    assert.equal(resAuth.valid, false);
+    assert.equal(resAuth.status, VerificationStatus.MERKLE_MISMATCH);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('12. Reject FSS checkpoint when epoch is revoked via revocation notice', async () => {
+  const dir = createTempKeysDir();
+  try {
+    const { fss, publicTree } = createTestFssSetup(dir, 8);
+    const leafHashes = makeLeafHashes(3);
+
+    const checkpointEpoch0 = createFssCheckpoint(
+      {
+        source_id: 'server-fss',
+        start_sequence: 1,
+        end_sequence: 3,
+        leaf_hashes: leafHashes,
+      },
+      fss
+    );
+
+    // Advance to epoch 1
+    fss.evolve(publicTree.authPaths[1]);
+    assert.equal(fss.epoch, 1);
+
+    const checkpointEpoch1 = createFssCheckpoint(
+      {
+        source_id: 'server-fss',
+        start_sequence: 4,
+        end_sequence: 6,
+        leaf_hashes: leafHashes,
+      },
+      fss
+    );
+
+    // Revoke at epoch 1
+    const revocationNotice = fss.revokeEmergency({ reason: 'Emergency security breach during epoch 1' });
+    assert.equal(revocationNotice.compromiseEpoch, 1);
+
+    // Epoch 0 was created BEFORE revocation -> must still verify!
+    const resEpoch0 = verifyCheckpoint(checkpointEpoch0, fss.mpk, { revocationNotice });
+    assert.equal(resEpoch0.valid, true);
+    assert.equal(resEpoch0.status, VerificationStatus.VERIFIED);
+
+    // Epoch 1 is revoked -> verification MUST fail with KEY_REVOKED
+    const resEpoch1 = verifyCheckpoint(checkpointEpoch1, fss.mpk, { revocationNotice });
+    assert.equal(resEpoch1.valid, false);
+    assert.equal(resEpoch1.status, VerificationStatus.KEY_REVOKED);
+    assert.ok(resEpoch1.failures.some((f) => f.includes('revoked')));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('13. Verify historical FSS checkpoint across multiple epoch evolutions', async () => {
+  const dir = createTempKeysDir();
+  try {
+    const { fss, publicTree } = createTestFssSetup(dir, 8);
+    const leafHashes = makeLeafHashes(2);
+
+    const historicalCp = createFssCheckpoint(
+      {
+        source_id: 'server-fss',
+        start_sequence: 1,
+        end_sequence: 2,
+        leaf_hashes: leafHashes,
+      },
+      fss
+    );
+    assert.equal(historicalCp.fss_epoch, 0);
+
+    // Advance epoch 3 times
+    fss.evolve(publicTree.authPaths[1]);
+    fss.evolve(publicTree.authPaths[2]);
+    fss.evolve(publicTree.authPaths[3]);
+    assert.equal(fss.epoch, 3);
+
+    // Historical checkpoint from epoch 0 must STILL verify successfully with MPK
+    const resHistorical = verifyCheckpoint(historicalCp, fss.mpk);
+    assert.equal(resHistorical.valid, true);
+    assert.equal(resHistorical.status, VerificationStatus.VERIFIED);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

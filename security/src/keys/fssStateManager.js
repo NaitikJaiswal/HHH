@@ -53,6 +53,14 @@ export class FssStateManager {
     }
   }
 
+  get mpk() {
+    return this.activeState?.mpk || this.revocationNotice?.mpk || null;
+  }
+
+  get epoch() {
+    return this.activeState?.epoch ?? null;
+  }
+
   /**
    * Initialize or set active in-memory state, verifying rollback protection.
    *
