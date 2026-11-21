@@ -4,7 +4,7 @@ import NavigationRail from './components/NavigationRail';
 import NodeDetailPanel from './components/NodeDetailPanel';
 import AuthModal from './components/AuthModal';
 
-// 10 Command Modules
+// 10 Command Modules & Core Views
 import OverviewDashboard from './pages/OverviewDashboard';
 import EvidenceVault from './pages/EvidenceVault';
 import HashVerification from './pages/HashVerification';
@@ -15,6 +15,9 @@ import Investigations from './pages/Investigations';
 import AuditTrail from './pages/AuditTrail';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
+import LogsExplorer from './pages/LogsExplorer';
+import IntegrityVerifier from './pages/IntegrityVerifier';
+import AgentMonitor from './pages/AgentMonitor';
 
 // Forensic Store Data
 import { 
@@ -71,6 +74,12 @@ export default function App() {
             setActiveTab={setActiveTab}
           />
         );
+      case 'logs':
+        return <LogsExplorer onSelectLog={setSelectedNode} />;
+      case 'integrity':
+        return <IntegrityVerifier />;
+      case 'agents':
+        return <AgentMonitor />;
       case 'vault':
         return (
           <EvidenceVault

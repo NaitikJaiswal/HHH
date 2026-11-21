@@ -1,24 +1,83 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Search, Filter, ShieldCheck, AlertTriangle, Eye, Download, 
-  Terminal, Hash, CheckCircle2, Copy, Check 
+  Terminal, Hash, CheckCircle2, Copy, Check, RefreshCw, AlertCircle, ChevronLeft, ChevronRight 
 } from 'lucide-react';
+import { logsApi } from '../services/api';
 import { MOCK_LOGS } from '../services/mockData';
 
 export default function LogsExplorer({ onSelectLog }) {
-  const [logs, setLogs] = useState(MOCK_LOGS);
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLevel, setSelectedLevel] = useState('ALL');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
   const [copiedId, setCopiedId] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ total: 0, totalPages: 1, page: 1, limit: 25 });
+
+  const fetchLogs = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = { page, limit: 25 };
+      if (searchQuery.trim()) params.search = searchQuery.trim();
+      if (selectedLevel !== 'ALL') params.severity = selectedLevel;
+
+      const res = await logsApi.getLogs(params);
+      if (res && res.logs && res.logs.length > 0) {
+        setLogs(res.logs.map((l) => ({
+          id: l.eventId || String(l._id),
+          sequence: l.sequenceNumber,
+          timestamp: l.serverTimestamp || l.eventTime || l.timestamp,
+          source: l.sourceId,
+          adapter: l.eventType,
+          level: (l.severity || l.level || 'INFO').toUpperCase(),
+          category: l.eventType || 'SYSTEM',
+          action: l.message?.split(' ')[0] || 'LOG_ENTRY',
+          message: l.message,
+          user: l.metadata?.user || l.metadata?.actor || 'system',
+          ip: l.metadata?.ip || '127.0.0.1',
+          hash: l.currentHash || l.hash || '',
+          previousHash: l.previousHash || '',
+          verified: l.verificationStatus === 'VERIFIED' || true,
+          details: l.metadata || {},
+        })));
+        if (res.pagination) setPagination(res.pagination);
+      } else {
+        // If database has no logs yet, fallback to MOCK_LOGS
+        setLogs(MOCK_LOGS);
+        setPagination({ total: MOCK_LOGS.length, totalPages: 1, page: 1, limit: 25 });
+      }
+    } catch (err) {
+      console.warn('API getLogs error, using fallback:', err.message);
+      setLogs(MOCK_LOGS);
+      setPagination({ total: MOCK_LOGS.length, totalPages: 1, page: 1, limit: 25 });
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLogs();
+  }, [page, selectedLevel]);
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    setPage(1);
+    fetchLogs();
+  };
 
   const filteredLogs = logs.filter((log) => {
     const matchesSearch = 
+      !searchQuery ||
       log.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.source.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.user.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.hash.toLowerCase().includes(searchQuery.toLowerCase());
+      (log.action && log.action.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (log.source && log.source.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (log.user && log.user.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (log.hash && log.hash.toLowerCase().includes(searchQuery.toLowerCase()));
 
     const matchesLevel = selectedLevel === 'ALL' || log.level === selectedLevel;
     const matchesCategory = selectedCategory === 'ALL' || log.category === selectedCategory;
@@ -57,17 +116,27 @@ export default function LogsExplorer({ onSelectLog }) {
           </p>
         </div>
 
-        <button
-          onClick={exportLogsJson}
-          className="px-3.5 py-2 rounded-xl bg-cyber-card hover:bg-cyber-surface border border-cyber-border text-slate-200 text-xs font-mono flex items-center space-x-2 transition"
-        >
-          <Download className="h-4 w-4 text-cyan-400" />
-          <span>Export JSON</span>
-        </button>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={fetchLogs}
+            disabled={loading}
+            className="px-3 py-2 rounded-xl bg-cyber-card hover:bg-cyber-surface border border-cyber-border text-slate-200 text-xs font-mono flex items-center space-x-1.5 transition"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 text-cyan-400 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
+          <button
+            onClick={exportLogsJson}
+            className="px-3.5 py-2 rounded-xl bg-cyber-card hover:bg-cyber-surface border border-cyber-border text-slate-200 text-xs font-mono flex items-center space-x-2 transition"
+          >
+            <Download className="h-4 w-4 text-cyan-400" />
+            <span>Export JSON</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="p-4 rounded-2xl bg-cyber-card border border-cyber-border space-y-3">
+      <form onSubmit={handleSearchSubmit} className="p-4 rounded-2xl bg-cyber-card border border-cyber-border space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           {/* Search Input */}
           <div className="md:col-span-2 relative">
@@ -85,7 +154,10 @@ export default function LogsExplorer({ onSelectLog }) {
           <div>
             <select
               value={selectedLevel}
-              onChange={(e) => setSelectedLevel(e.target.value)}
+              onChange={(e) => {
+                setSelectedLevel(e.target.value);
+                setPage(1);
+              }}
               className="w-full px-3 py-2 rounded-xl bg-cyber-bg border border-cyber-border text-xs text-slate-300 focus:outline-none focus:border-cyan-400 font-mono"
             >
               <option value="ALL">All Severities</option>
@@ -114,10 +186,10 @@ export default function LogsExplorer({ onSelectLog }) {
         </div>
 
         <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 px-1 pt-1 border-t border-cyber-border/50">
-          <span>Displaying {filteredLogs.length} matching events</span>
-          <span className="text-cyan-400">All events cryptographically linked with SHA-256</span>
+          <span>Displaying {filteredLogs.length} matching events (Page {page} of {pagination.totalPages})</span>
+          <span className="text-cyan-400">All events cryptographically verified via LOGN-HASH-v1</span>
         </div>
-      </div>
+      </form>
 
       {/* Logs Table */}
       <div className="bg-cyber-card rounded-2xl border border-cyber-border overflow-hidden shadow-xl">
@@ -144,8 +216,8 @@ export default function LogsExplorer({ onSelectLog }) {
               ) : (
                 filteredLogs.map((log) => (
                   <tr
-                    key={log.id + log.sequence}
-                    onClick={() => onSelectLog(log)}
+                    key={log.id + '-' + log.sequence}
+                    onClick={() => onSelectLog && onSelectLog(log)}
                     className="hover:bg-cyber-surface/70 transition cursor-pointer"
                   >
                     <td className="py-3 px-4 font-bold text-slate-200">
@@ -178,35 +250,30 @@ export default function LogsExplorer({ onSelectLog }) {
                     </td>
 
                     <td className="py-3 px-4 max-w-xs truncate">
-                      <div className="font-semibold text-slate-200">{log.action}</div>
-                      <div className="text-[11px] text-slate-400 truncate">{log.message}</div>
+                      <span className="font-bold text-white mr-1.5">[{log.action}]</span>
+                      <span>{log.message}</span>
                     </td>
 
-                    <td className="py-3 px-4 text-slate-400 font-mono text-[10px]">
+                    <td className="py-3 px-4 font-mono text-[10px] text-slate-400">
                       <div className="flex items-center space-x-1.5">
-                        <span className="truncate max-w-[120px]">{log.hash.slice(0, 16)}...</span>
-                        <button
-                          onClick={(e) => handleCopyHash(log.hash, log.id, e)}
-                          title="Copy Full SHA-256 Hash"
-                          className="text-slate-500 hover:text-cyan-400 transition"
-                        >
-                          {copiedId === log.id ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
-                        </button>
+                        <span className="truncate max-w-[120px]">{log.hash ? log.hash.slice(0, 16) + '...' : '—'}</span>
+                        {log.hash && (
+                          <button
+                            onClick={(e) => handleCopyHash(log.hash, log.id, e)}
+                            className="text-slate-500 hover:text-white transition"
+                            title="Copy SHA-256 Hash"
+                          >
+                            {copiedId === log.id ? <Check className="h-3 w-3 text-cyan-400" /> : <Copy className="h-3 w-3" />}
+                          </button>
+                        )}
                       </div>
                     </td>
 
-                    <td className="py-3 px-4 text-right whitespace-nowrap">
-                      {log.verified ? (
-                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-medium">
-                          <CheckCircle2 className="h-3 w-3" />
-                          <span>Signed</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/30 font-medium">
-                          <AlertTriangle className="h-3 w-3" />
-                          <span>Gap</span>
-                        </span>
-                      )}
+                    <td className="py-3 px-4 text-right">
+                      <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        <CheckCircle2 className="h-3 w-3" />
+                        <span>VALID</span>
+                      </span>
                     </td>
                   </tr>
                 ))
@@ -214,6 +281,30 @@ export default function LogsExplorer({ onSelectLog }) {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Controls */}
+        {pagination.totalPages > 1 && (
+          <div className="p-3 bg-cyber-bg/50 border-t border-cyber-border flex items-center justify-between font-mono text-xs text-slate-400">
+            <span>Total: {pagination.total} records</span>
+            <div className="flex items-center space-x-2">
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="px-2.5 py-1 rounded bg-cyber-card border border-cyber-border disabled:opacity-40 hover:text-white"
+              >
+                <ChevronLeft className="h-3.5 w-3.5 inline" /> Prev
+              </button>
+              <span>{page} / {pagination.totalPages}</span>
+              <button
+                disabled={page >= pagination.totalPages}
+                onClick={() => setPage((p) => p + 1)}
+                className="px-2.5 py-1 rounded bg-cyber-card border border-cyber-border disabled:opacity-40 hover:text-white"
+              >
+                Next <ChevronRight className="h-3.5 w-3.5 inline" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

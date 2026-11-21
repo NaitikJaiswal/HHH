@@ -5,6 +5,10 @@ import {
   getCheckpointsList,
   createSourceCheckpoint,
   getAlerts,
+  getFssState,
+  evolveFssEpoch,
+  revokeFssEmergency,
+  getBlockchainStatus,
 } from '../controllers/integrityController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
@@ -18,5 +22,11 @@ router.get('/status', getStatus);
 router.get('/checkpoints', getCheckpointsList);
 router.post('/checkpoints', createSourceCheckpoint);
 router.get('/alerts', getAlerts);
+
+// FSS and Blockchain endpoints
+router.get('/fss/status', getFssState);
+router.post('/fss/evolve', evolveFssEpoch);
+router.post('/fss/revoke', revokeFssEmergency);
+router.get('/blockchain/status', getBlockchainStatus);
 
 export default router;

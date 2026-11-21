@@ -99,10 +99,97 @@ export const createSourceCheckpoint = async (req, res, next) => {
   }
 };
 
+/**
+ * Get active forward-secure signing key status
+ * GET /api/integrity/fss/status
+ */
+export const getFssState = async (req, res, next) => {
+  try {
+    const status = checkpointService.getFssStatus();
+    res.status(200).json({
+      success: true,
+      message: 'FSS key status retrieved',
+      data: {
+        ...status,
+        version: 'HHH-MKT-FSS-v1',
+        algorithm: 'Ed25519-MKT-FSS',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Evolve FSS signing state to next epoch
+ * POST /api/integrity/fss/evolve
+ */
+export const evolveFssEpoch = async (req, res, next) => {
+  try {
+    const result = await checkpointService.evolveEpoch();
+    res.status(200).json({
+      success: true,
+      message: 'FSS epoch evolved successfully',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Emergency key revocation
+ * POST /api/integrity/fss/revoke
+ */
+export const revokeFssEmergency = async (req, res, next) => {
+  try {
+    const notice = await checkpointService.revokeKeyEmergency(req.body);
+    res.status(200).json({
+      success: true,
+      message: 'Emergency revocation executed',
+      data: notice,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get Quai blockchain anchoring status and network info
+ * GET /api/integrity/blockchain/status
+ */
+export const getBlockchainStatus = async (req, res, next) => {
+  try {
+    const status = {
+      network: 'Quai Orchard Testnet',
+      zone: 'cyprus1',
+      chainId: 15000,
+      rpcUrl: process.env.QUAI_RPC_URL || 'https://orchard.rpc.quai.network/cyprus1',
+      contractAddress: process.env.QUAI_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000',
+      isLiveConfigured: Boolean(process.env.QUAI_RPC_URL),
+      status: process.env.QUAI_RPC_URL ? 'ONLINE' : 'PREFLIGHT_STANDBY',
+      explorerBaseUrl: 'https://quaiscan.io',
+      lastAnchoredEpoch: checkpointService.getFssStatus()?.epoch ?? 0,
+    };
+
+    res.status(200).json({
+      success: true,
+      message: 'Quai anchoring status retrieved',
+      data: status,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export default {
   verifyIntegrity,
   getStatus,
   getCheckpointsList,
   createSourceCheckpoint,
   getAlerts,
+  getFssState,
+  evolveFssEpoch,
+  revokeFssEmergency,
+  getBlockchainStatus,
 };

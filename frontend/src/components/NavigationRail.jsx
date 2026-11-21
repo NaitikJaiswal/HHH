@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   LayoutDashboard, Archive, Hash, GitCommit, Database, 
   Crosshair, Briefcase, History, FileSpreadsheet, Sliders, 
-  ChevronLeft, ChevronRight, Shield 
+  ChevronLeft, ChevronRight, Shield, Terminal, ShieldCheck, Cpu 
 } from 'lucide-react';
 
 export default function NavigationRail({ activeTab, setActiveTab }) {
@@ -10,10 +10,13 @@ export default function NavigationRail({ activeTab, setActiveTab }) {
 
   const navItems = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { id: 'logs', label: 'Log Explorer', icon: Terminal },
+    { id: 'integrity', label: 'Integrity Verifier', icon: ShieldCheck },
+    { id: 'agents', label: 'Collector Agents', icon: Cpu },
     { id: 'vault', label: 'Evidence Vault', icon: Archive, badge: '4' },
     { id: 'hash', label: 'Hash Verification', icon: Hash },
     { id: 'merkle', label: 'Merkle Explorer', icon: GitCommit },
-    { id: 'ledger', label: 'Blockchain Ledger', icon: Database, badge: 'Live' },
+    { id: 'ledger', label: 'Blockchain Ledger', icon: Database, badge: 'Quai' },
     { id: 'threats', label: 'Threat Hunting', icon: Crosshair, alert: true },
     { id: 'investigations', label: 'Investigations', icon: Briefcase, badge: '2' },
     { id: 'audit', label: 'Audit Trail', icon: History },

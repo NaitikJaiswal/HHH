@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, AlertTriangle, Database, ArrowUpRight, 
   Terminal, CheckCircle2, ShieldAlert, Cpu, Lock, FileCheck, 
@@ -6,6 +6,7 @@ import {
   Box, List, BarChart3, Clock, CheckCircle, XCircle, AlertCircle, Share2
 } from 'lucide-react';
 import ForensicNodeScene from '../components/ForensicNodeScene';
+import { dashboardApi, fssApi } from '../services/api';
 
 export default function OverviewDashboard({ 
   nodes, 
@@ -17,13 +18,42 @@ export default function OverviewDashboard({
   const [viewMode, setViewMode] = useState('3D'); // '3D' | 'LIST' | 'ANALYTICS'
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('ALL');
+  const [backendStats, setBackendStats] = useState(null);
+  const [fssInfo, setFssInfo] = useState(null);
+  const [liveActivity, setLiveActivity] = useState([]);
+
+  useEffect(() => {
+    async function loadBackendDashboard() {
+      try {
+        const [statsRes, actRes, fssRes] = await Promise.allSettled([
+          dashboardApi.getStats(),
+          dashboardApi.getActivity(10),
+          fssApi.getStatus(),
+        ]);
+        if (statsRes.status === 'fulfilled' && statsRes.value) {
+          setBackendStats(statsRes.value);
+        }
+        if (actRes.status === 'fulfilled' && actRes.value) {
+          setLiveActivity(actRes.value);
+        }
+        if (fssRes.status === 'fulfilled' && fssRes.value) {
+          setFssInfo(fssRes.value);
+        }
+      } catch (err) {
+        console.warn('Dashboard telemetry fetch notice:', err.message);
+      }
+    }
+    loadBackendDashboard();
+    const interval = setInterval(loadBackendDashboard, 15000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Operational Metrics
-  const totalEvidence = nodes.filter(n => n.category === 'EVIDENCE').length;
-  const verifiedEvidence = nodes.filter(n => n.category === 'EVIDENCE' && n.status === 'VERIFIED').length;
-  const integrityFailures = nodes.filter(n => n.status === 'FAILED').length;
-  const activeInvestigations = nodes.filter(n => n.category === 'INVESTIGATION').length;
-  const blockchainAnchored = nodes.filter(n => n.category === 'BLOCKCHAIN' || n.status === 'ANCHORED').length;
+  const totalEvents = backendStats?.totalLogs ?? (nodes.filter(n => n.category === 'EVIDENCE').length);
+  const verifiedEvents = backendStats ? (backendStats.totalLogs - (backendStats.criticalIncidents || 0)) : nodes.filter(n => n.category === 'EVIDENCE' && n.status === 'VERIFIED').length;
+  const integrityFailures = backendStats?.criticalIncidents ?? nodes.filter(n => n.status === 'FAILED').length;
+  const activeInvestigations = backendStats?.openIncidents ?? nodes.filter(n => n.category === 'INVESTIGATION').length;
+  const blockchainAnchored = backendStats?.totalCheckpoints ?? nodes.filter(n => n.category === 'BLOCKCHAIN' || n.status === 'ANCHORED').length;
 
   const filterOptions = [
     { id: 'ALL', label: 'All Entities', count: nodes.length },
@@ -100,36 +130,38 @@ export default function OverviewDashboard({
       {/* 2. COMPACT OPERATIONAL TELEMETRY METRICS */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 font-mono">
         <div className="p-4 rounded-xl bg-[#101114] border border-white/10 space-y-1 hover:border-white/20 transition">
-          <div className="text-[10px] text-platinum-500 uppercase tracking-wider">Total Evidence</div>
-          <div className="text-xl font-bold text-white tracking-tight">{totalEvidence + 1416}</div>
-          <div className="text-[10px] text-platinum-400">Recorded files</div>
+          <div className="text-[10px] text-platinum-500 uppercase tracking-wider">Total Events</div>
+          <div className="text-xl font-bold text-white tracking-tight">{totalEvents}</div>
+          <div className="text-[10px] text-platinum-400">Recorded records</div>
         </div>
 
         <div className="p-4 rounded-xl bg-[#101114] border border-white/10 space-y-1 hover:border-white/20 transition">
           <div className="text-[10px] text-platinum-500 uppercase tracking-wider">Verified Records</div>
-          <div className="text-xl font-bold text-white tracking-tight">{verifiedEvidence + 1414}</div>
+          <div className="text-xl font-bold text-white tracking-tight">{verifiedEvents}</div>
           <div className="text-[10px] text-emerald-400 flex items-center space-x-1">
             <CheckCircle2 className="h-3 w-3" />
-            <span>99.9% Integrity</span>
+            <span>FSS Epoch {fssInfo?.epoch ?? 0}</span>
           </div>
         </div>
 
         <div className="p-4 rounded-xl bg-[#101114] border border-red-500/30 space-y-1 hover:border-red-500 transition">
           <div className="text-[10px] text-red-400 uppercase tracking-wider">Integrity Failures</div>
           <div className="text-xl font-bold text-red-400 tracking-tight">{integrityFailures}</div>
-          <div className="text-[10px] text-red-400/80">Tamper detected</div>
+          <div className="text-[10px] text-red-400/80">
+            {integrityFailures > 0 ? 'Tamper detected' : 'Zero compromises'}
+          </div>
         </div>
 
         <div className="p-4 rounded-xl bg-[#101114] border border-white/10 space-y-1 hover:border-white/20 transition">
           <div className="text-[10px] text-platinum-500 uppercase tracking-wider">Active Cases</div>
-          <div className="text-xl font-bold text-white tracking-tight">{activeInvestigations + 2}</div>
+          <div className="text-xl font-bold text-white tracking-tight">{activeInvestigations}</div>
           <div className="text-[10px] text-platinum-400">Dossiers tracked</div>
         </div>
 
         <div className="p-4 rounded-xl bg-[#101114] border border-white/10 space-y-1 hover:border-white/20 transition col-span-2 md:col-span-1">
           <div className="text-[10px] text-platinum-500 uppercase tracking-wider">Blockchain Anchors</div>
-          <div className="text-xl font-bold text-sky-400 tracking-tight">{blockchainAnchored + 840}</div>
-          <div className="text-[10px] text-sky-400">Sepolia EVM</div>
+          <div className="text-xl font-bold text-sky-400 tracking-tight">{blockchainAnchored}</div>
+          <div className="text-[10px] text-sky-400">Quai Cyprus-1</div>
         </div>
       </div>
 

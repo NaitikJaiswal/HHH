@@ -12,6 +12,8 @@ import integrityRoutes from './routes/integrityRoutes.js';
 import incidentRoutes from './routes/incidentRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import sourceRoutes from './routes/sourceRoutes.js';
+import evidenceRoutes from './routes/evidenceRoutes.js';
+import forensicRoutes from './routes/forensicRoutes.js';
 
 const app = express();
 
@@ -79,6 +81,8 @@ app.use('/api/integrity', integrityRoutes);
 app.use('/api/incidents', incidentRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/sources', sourceRoutes);
+app.use('/api/evidence', evidenceRoutes);
+app.use('/api/forensics', forensicRoutes);
 
 // Collector and v1 API route aliases
 app.use('/api/v1/logs/ingest', logRoutes);
