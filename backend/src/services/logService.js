@@ -24,7 +24,7 @@ const releaseLock = (sourceId) => {
  */
 export const ingestSingleLog = async (rawEvent, collectorId = null) => {
   const normalized = normalizeEvent(rawEvent, collectorId);
-  const { eventId, sourceId, eventType, message, metadata, timestamp } = normalized;
+  const { eventId, sourceId, eventType, severity, message, metadata, timestamp } = normalized;
 
   // 1. Idempotency Check: Prevent duplicate event ingestion
   const existingLog = await Log.findOne({ eventId });
@@ -67,15 +67,18 @@ export const ingestSingleLog = async (rawEvent, collectorId = null) => {
     const nextSequence = (source.lastSequenceNumber || 0) + 1;
     const previousHash = source.lastHash || GENESIS_HASH;
 
-    // 4. Compute deterministic SHA-256 hash
+    // 4. Compute deterministic SHA-256 hash using authoritative LOGN-HASH-v1
     const currentHash = generateLogHash({
       eventId,
       sourceId,
       sequenceNumber: nextSequence,
       timestamp,
+      eventType,
+      severity,
       message,
       metadata,
       previousHash,
+      hashSchemaVersion: 'LOGN-HASH-v1',
     });
 
     // 5. Persist Log record with server timestamp
@@ -83,6 +86,8 @@ export const ingestSingleLog = async (rawEvent, collectorId = null) => {
       eventId,
       sourceId,
       eventType,
+      severity,
+      hashSchemaVersion: 'LOGN-HASH-v1',
       message,
       metadata,
       timestamp,

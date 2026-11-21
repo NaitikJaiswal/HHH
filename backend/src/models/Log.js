@@ -21,6 +21,19 @@ const logSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+    severity: {
+      type: String,
+      enum: ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+      default: 'INFO',
+      trim: true,
+      index: true,
+    },
+    hashSchemaVersion: {
+      type: String,
+      default: 'LOGN-HASH-v1',
+      trim: true,
+      index: true,
+    },
     message: {
       type: String,
       required: [true, 'Log message is required'],

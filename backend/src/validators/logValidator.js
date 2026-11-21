@@ -1,14 +1,29 @@
 /**
- * Normalizes an event item to ensure camelCase field consistency
+ * Normalizes an event item to ensure field consistency
+ * Maps both snake_case and camelCase attributes into canonical backend format
  */
 export const normalizeEvent = (rawEvent, fallbackSourceId = 'default_source') => {
+  const eventTimeRaw = rawEvent.event_time || rawEvent.eventTime || rawEvent.timestamp;
+  const parsedDate = eventTimeRaw ? new Date(eventTimeRaw) : new Date();
+  const safeDate = isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+
+  // Normalize severity to standard 5-level enum (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+  const rawSev = String(rawEvent.severity || rawEvent.level || 'INFO').trim().toUpperCase();
+  const validSeverities = new Set(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']);
+  const severity = validSeverities.has(rawSev) ? rawSev : (rawSev === 'WARN' ? 'WARNING' : 'INFO');
+
   return {
-    eventId: rawEvent.eventId || rawEvent.event_id || rawEvent.id,
-    sourceId: rawEvent.sourceId || rawEvent.source_id || rawEvent.host_id || fallbackSourceId,
-    eventType: rawEvent.eventType || rawEvent.event_type || 'SYSTEM_EVENT',
-    message: rawEvent.message || rawEvent.msg || (typeof rawEvent === 'string' ? rawEvent : ''),
-    metadata: rawEvent.metadata || rawEvent.details || {},
-    timestamp: rawEvent.timestamp ? new Date(rawEvent.timestamp) : new Date(),
+    eventId: String(rawEvent.eventId || rawEvent.event_id || rawEvent.id || '').trim(),
+    sourceId: String(rawEvent.sourceId || rawEvent.source_id || rawEvent.host_id || fallbackSourceId).trim(),
+    eventType: String(rawEvent.eventType || rawEvent.event_type || 'SYSTEM_EVENT').trim().toUpperCase(),
+    severity,
+    message: String(rawEvent.message || rawEvent.msg || (typeof rawEvent === 'string' ? rawEvent : '')),
+    metadata: (rawEvent.metadata && typeof rawEvent.metadata === 'object' && !Array.isArray(rawEvent.metadata))
+      ? rawEvent.metadata
+      : (rawEvent.details && typeof rawEvent.details === 'object' && !Array.isArray(rawEvent.details))
+        ? rawEvent.details
+        : {},
+    timestamp: safeDate,
   };
 };
 

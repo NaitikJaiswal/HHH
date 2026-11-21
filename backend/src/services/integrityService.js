@@ -83,6 +83,9 @@ export const verifySourceHashChain = async (sourceId) => {
       message: current.message,
       metadata: current.metadata,
       previousHash: current.previousHash,
+      eventType: current.eventType,
+      severity: current.severity,
+      hashSchemaVersion: current.hashSchemaVersion,
     });
 
     if (recalculatedHash !== current.currentHash) {
