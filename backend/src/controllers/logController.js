@@ -15,7 +15,9 @@ export const ingestLogs = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
+      status: 'success',
       message: 'Log record(s) processed and chained successfully',
+      acknowledged_ids,
       data: {
         acknowledged_ids,
         ...(isBatch ? result : { log: result.log, isDuplicate: result.isDuplicate }),

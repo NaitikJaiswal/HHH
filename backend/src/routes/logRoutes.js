@@ -9,6 +9,7 @@ const router = express.Router();
 
 // Ingest logs: Accepts API key or authenticated user token
 router.post('/', authenticateCollector, validate(validateLogPayload), ingestLogs);
+router.post('/ingest', authenticateCollector, validate(validateLogPayload), ingestLogs);
 
 // Query stats: Protected for authenticated users (analysts, auditors, admins)
 router.get('/stats', protect, getStats);

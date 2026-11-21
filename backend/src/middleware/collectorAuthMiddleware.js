@@ -10,7 +10,7 @@ import { verifyToken } from '../services/authService.js';
 export const authenticateCollector = async (req, res, next) => {
   const globalKey = process.env.COLLECTOR_API_KEY || 'default_collector_secret_key';
 
-  let providedKey = req.headers['x-api-key'];
+  let providedKey = req.headers['x-api-key'] || req.headers['x-collector-key'];
 
   if (!providedKey && req.headers.authorization) {
     const parts = req.headers.authorization.split(' ');

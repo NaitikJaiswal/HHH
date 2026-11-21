@@ -80,6 +80,15 @@ app.use('/api/incidents', incidentRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/sources', sourceRoutes);
 
+// Collector and v1 API route aliases
+app.use('/api/v1/logs/ingest', logRoutes);
+app.use('/api/v1/logs', logRoutes);
+app.use('/api/v1/collectors/heartbeat', (req, res, next) => {
+  req.url = '/heartbeat';
+  sourceRoutes(req, res, next);
+});
+app.use('/api/v1/collectors', sourceRoutes);
+
 // 7. 404 & Centralized Error Middleware
 app.use(notFound);
 app.use(errorHandler);

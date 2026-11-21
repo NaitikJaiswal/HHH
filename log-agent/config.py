@@ -17,7 +17,7 @@ class AgentConfig:
 
     # Backend API settings
     backend_url: str = field(
-        default_factory=lambda: os.getenv("LOGN_BACKEND_URL", "http://localhost:3000").rstrip("/")
+        default_factory=lambda: os.getenv("LOGN_BACKEND_URL", "http://localhost:5000").rstrip("/")
     )
     ingest_endpoint: str = field(
         default_factory=lambda: os.getenv("LOGN_INGEST_ENDPOINT", "/api/v1/logs/ingest")
