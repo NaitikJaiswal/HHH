@@ -17,6 +17,16 @@ export default {
     },
   },
   plugins: [hardhatEthers, hardhatMocha],
+  networks: {
+    hardhat: {
+      // Local development and unit testing network
+    },
+    quaiOrchardCyprus1: {
+      url: process.env.QUAI_RPC_URL || "https://orchard.rpc.quai.network/cyprus1",
+      chainId: Number.parseInt(process.env.QUAI_CHAIN_ID || "9000", 10),
+      accounts: process.env.QUAI_PRIVATE_KEY ? [process.env.QUAI_PRIVATE_KEY] : [],
+    },
+  },
   paths: {
     root: path.resolve(__dirname, ".."),
     sources: path.resolve(__dirname, "../contracts"),
