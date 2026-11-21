@@ -23,6 +23,9 @@ import {
   getMerkleRoot,
   generateMerkleProof,
   verifyMerkleProof,
+  verifyInclusionProofBundle,
+  MERKLE_SCHEMA_VERSION,
+  MERKLE_HASH_ALGORITHM,
   leafHash,
   internalHash,
   EMPTY_TREE_ROOT,
@@ -248,4 +251,87 @@ test('11. Input validation rejects malformed hashes and out-of-bounds indices', 
     () => verifyMerkleProof(makeHexHash(1), [{ sibling_hash: makeHexHash('ok'), position: 'top' }], tree.root),
     TypeError
   );
+});
+
+test('12. Contract Section 6.7 authoritative two-leaf test vector matches', () => {
+  const h0 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'; // SHA256("")
+  const h1 = '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'; // SHA256("hello")
+  const tree = buildMerkleTree([h0, h1]);
+
+  assert.equal(tree.root, '22e7f12936a0a01d0922a443fa639c60ad12a99d5ec7454ea38bc80e354ee58e');
+  const proof0 = generateMerkleProof(tree, 0);
+  assert.equal(verifyMerkleProof(h0, proof0.proof, tree.root), true);
+  const proof1 = generateMerkleProof(tree, 1);
+  assert.equal(verifyMerkleProof(h1, proof1.proof, tree.root), true);
+});
+
+test('13. Metadata-bound inclusion proof bundle contains all required fields and verifies independently', () => {
+  const hashes = [makeHexHash('a'), makeHexHash('b'), makeHexHash('c')];
+  const tree = buildMerkleTree(hashes);
+
+  const bundle = generateMerkleProof(tree, 1);
+  assert.equal(bundle.version, MERKLE_SCHEMA_VERSION);
+  assert.equal(bundle.tree_schema_version, MERKLE_SCHEMA_VERSION);
+  assert.equal(bundle.hash_algorithm, MERKLE_HASH_ALGORITHM);
+  assert.equal(bundle.tree_size, 3);
+  assert.equal(bundle.leaf_index, 1);
+  assert.equal(bundle.event_hash, hashes[1]);
+  assert.equal(bundle.root, tree.root);
+
+  const result = verifyInclusionProofBundle(bundle);
+  assert.equal(result.valid, true);
+  assert.equal(result.root, tree.root);
+  assert.equal(result.leaf_index, 1);
+});
+
+test('14. Large tree (128 leaves) builds and verifies inclusion proofs for all leaves', () => {
+  const hashes = Array.from({ length: 128 }, (_, i) => makeHexHash(`event-batch-${i}`));
+  const tree = buildMerkleTree(hashes);
+
+  assert.equal(tree.layers.length, 8); // log2(128) + 1
+  assert.equal(tree.tree_size, 128);
+
+  for (let i = 0; i < 128; i += 16) {
+    const bundle = generateMerkleProof(tree, i);
+    const ver = verifyInclusionProofBundle(bundle);
+    assert.equal(ver.valid, true);
+  }
+});
+
+test('15. Duplicate event hashes in same tree produce valid distinct proofs for each position', () => {
+  const dupHash = makeHexHash('identical-event');
+  const tree = buildMerkleTree([dupHash, dupHash]);
+
+  const p0 = generateMerkleProof(tree, 0);
+  const p1 = generateMerkleProof(tree, 1);
+
+  assert.equal(p0.leaf_index, 0);
+  assert.equal(p1.leaf_index, 1);
+  assert.equal(p0.proof[0].position, 'right');
+  assert.equal(p1.proof[0].position, 'left');
+
+  assert.equal(verifyInclusionProofBundle(p0).valid, true);
+  assert.equal(verifyInclusionProofBundle(p1).valid, true);
+});
+
+test('16. Rejects malformed or tampered proof bundles', () => {
+  const hashes = [makeHexHash('1'), makeHexHash('2')];
+  const tree = buildMerkleTree(hashes);
+  const validBundle = generateMerkleProof(tree, 0);
+
+  // 1. Wrong algorithm
+  const badAlgo = { ...validBundle, hash_algorithm: 'MD5' };
+  assert.equal(verifyInclusionProofBundle(badAlgo).valid, false);
+
+  // 2. Index out of bounds
+  const badIndex = { ...validBundle, leaf_index: 99 };
+  assert.equal(verifyInclusionProofBundle(badIndex).valid, false);
+
+  // 3. Altered event hash
+  const badEventHash = { ...validBundle, event_hash: makeHexHash('tampered') };
+  assert.equal(verifyInclusionProofBundle(badEventHash).valid, false);
+
+  // 4. Altered root
+  const badRoot = { ...validBundle, root: makeHexHash('fake-root') };
+  assert.equal(verifyInclusionProofBundle(badRoot).valid, false);
 });

@@ -34,6 +34,18 @@ const LEAF_TAG = Buffer.from([0x00]);
 const NODE_TAG = Buffer.from([0x01]);
 
 /**
+ * Standard Merkle tree schema version.
+ * @type {string}
+ */
+export const MERKLE_SCHEMA_VERSION = 'logn-merkle-v1';
+
+/**
+ * Cryptographic hash algorithm used for Merkle tree construction.
+ * @type {string}
+ */
+export const MERKLE_HASH_ALGORITHM = 'SHA-256';
+
+/**
  * The Merkle root for an empty set of leaves.
  * Per §6.5: SHA-256(0x00) = "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
  *
@@ -129,7 +141,7 @@ export function buildMerkleTree(currentHashes) {
 
   // Empty tree — per §6.5
   if (currentHashes.length === 0) {
-    return { root: EMPTY_TREE_ROOT, layers: [] };
+    return { root: EMPTY_TREE_ROOT, layers: [], eventHashes: [], tree_size: 0 };
   }
 
   // Validate all inputs before computing anything
@@ -159,7 +171,12 @@ export function buildMerkleTree(currentHashes) {
     currentLayer = nextLayer;
   }
 
-  return { root: currentLayer[0], layers };
+  return {
+    root: currentLayer[0],
+    layers,
+    eventHashes: currentHashes.slice(),
+    tree_size: currentHashes.length,
+  };
 }
 
 /**
@@ -246,12 +263,82 @@ export function generateMerkleProof(tree, leafIndex) {
     currentIndex = Math.floor(currentIndex / 2);
   }
 
+  const eventHash = (tree.eventHashes && tree.eventHashes[leafIndex])
+    ? tree.eventHashes[leafIndex]
+    : null;
+  const treeSize = tree.tree_size ?? leafLayer.length;
+
   return {
+    version: MERKLE_SCHEMA_VERSION,
+    tree_schema_version: MERKLE_SCHEMA_VERSION,
+    hash_algorithm: MERKLE_HASH_ALGORITHM,
+    tree_size: treeSize,
     leaf_index: leafIndex,
+    event_hash: eventHash,
     leaf_hash:  leafLayer[leafIndex],
     proof,
     root: tree.root,
   };
+}
+
+/**
+ * Verify a self-contained Merkle inclusion proof bundle.
+ *
+ * Verifies that the proof bundle correctly authenticates the event hash
+ * against the tree root, checking schema version, hash algorithm,
+ * leaf index bounds, and proof steps.
+ *
+ * @param {object} proofBundle - Proof object returned by generateMerkleProof().
+ * @param {string} [expectedRoot] - Optional expected Merkle root to match against.
+ * @returns {{ valid: boolean, root?: string, leaf_index?: number, error?: string, reason?: string }}
+ */
+export function verifyInclusionProofBundle(proofBundle, expectedRoot = null) {
+  if (!proofBundle || typeof proofBundle !== 'object') {
+    return { valid: false, error: 'INVALID_PROOF_BUNDLE', reason: 'Proof bundle must be an object' };
+  }
+  if (proofBundle.tree_schema_version && proofBundle.tree_schema_version !== MERKLE_SCHEMA_VERSION) {
+    return { valid: false, error: 'UNSUPPORTED_SCHEMA_VERSION', reason: `Expected ${MERKLE_SCHEMA_VERSION}` };
+  }
+  if (proofBundle.hash_algorithm && proofBundle.hash_algorithm !== MERKLE_HASH_ALGORITHM) {
+    return { valid: false, error: 'UNSUPPORTED_HASH_ALGORITHM', reason: `Expected ${MERKLE_HASH_ALGORITHM}` };
+  }
+  if (!Number.isInteger(proofBundle.leaf_index) || proofBundle.leaf_index < 0) {
+    return { valid: false, error: 'INVALID_LEAF_INDEX', reason: 'leaf_index must be a non-negative integer' };
+  }
+  if (Number.isInteger(proofBundle.tree_size) && proofBundle.leaf_index >= proofBundle.tree_size) {
+    return { valid: false, error: 'INDEX_OUT_OF_BOUNDS', reason: `leaf_index ${proofBundle.leaf_index} >= tree_size ${proofBundle.tree_size}` };
+  }
+  if (!Array.isArray(proofBundle.proof)) {
+    return { valid: false, error: 'MALFORMED_PROOF', reason: 'proof must be an array' };
+  }
+
+  const currentHash = proofBundle.event_hash;
+  if (!currentHash || typeof currentHash !== 'string' || !/^[0-9a-fA-F]{64}$/.test(currentHash)) {
+    return { valid: false, error: 'INVALID_EVENT_HASH', reason: 'event_hash must be a 64-char hex string' };
+  }
+
+  const targetRoot = expectedRoot || proofBundle.root;
+  if (!targetRoot || typeof targetRoot !== 'string' || !/^[0-9a-fA-F]{64}$/.test(targetRoot)) {
+    return { valid: false, error: 'INVALID_ROOT', reason: 'Root must be a 64-char hex string' };
+  }
+
+  try {
+    const isValid = verifyMerkleProof(currentHash, proofBundle.proof, targetRoot);
+    if (!isValid) {
+      return { valid: false, error: 'PROOF_VERIFICATION_FAILED', reason: 'Proof does not evaluate to expected root' };
+    }
+    if (proofBundle.root && targetRoot.toLowerCase() !== proofBundle.root.toLowerCase()) {
+      return { valid: false, error: 'ROOT_MISMATCH', reason: 'Expected root does not match bundle root' };
+    }
+    return {
+      valid: true,
+      root: targetRoot,
+      leaf_index: proofBundle.leaf_index,
+      tree_size: proofBundle.tree_size,
+    };
+  } catch (err) {
+    return { valid: false, error: 'VERIFICATION_ERROR', reason: err.message };
+  }
 }
 
 /**
@@ -317,10 +404,13 @@ export function verifyMerkleProof(currentHash, proof, expectedRoot) {
 
 export default {
   EMPTY_TREE_ROOT,
+  MERKLE_SCHEMA_VERSION,
+  MERKLE_HASH_ALGORITHM,
   leafHash,
   internalHash,
   buildMerkleTree,
   getMerkleRoot,
   generateMerkleProof,
   verifyMerkleProof,
+  verifyInclusionProofBundle,
 };
